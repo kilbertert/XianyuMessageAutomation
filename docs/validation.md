@@ -92,6 +92,28 @@ A second owned account sent `AUTO_e2e_003` while the new `inbox` command was run
 This validates the single-notification, latest-visible-message pipeline. Burst aggregation beyond
 the visible chat viewport remains a known limit.
 
+### Pending-queue consumer regression
+
+The local queue consumer is covered through its public API and CLI:
+
+- the oldest pending record is claimed with an owner and lease;
+- only the owner can acknowledge or fail a claim;
+- acknowledgement advances consumption to the next record;
+- an expired lease is redelivered with an incremented attempt count;
+- failures retry below the limit and become dead letters at the limit;
+- two concurrent local workers cannot claim the same message;
+- the consumer state contains no sender, body, or plaintext failure reason.
+
+The ignored queue record produced by the earlier `AUTO_e2e_003` phone run was also exercised
+through the real CLI:
+
+- `queue claim` returned the expected body with attempt `1`;
+- `queue fail` released the same fingerprint back to `pending`;
+- the consumer state contained the error hash but no body, sender, or plaintext reason;
+- the temporary consumer state and lock were removed after validation;
+- the original pending JSONL still contained its one record;
+- this queue-only command path did not instantiate the Android device adapter or send anything.
+
 ## What this proves
 
 This validates the controlled single-conversation path, the Chinese IME flow, post-send

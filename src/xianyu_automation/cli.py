@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from .config import load_config
+from .consumer import QueueConsumer
 from .device import Uiautomator2Device
 from .doctor import AdbDoctor
 from .errors import AutomationError
@@ -64,6 +65,33 @@ def _parser() -> argparse.ArgumentParser:
         "--include-existing",
         action="store_true",
         help="route active notifications on the first snapshot",
+    )
+
+    queue = subcommands.add_parser(
+        "queue",
+        help="claim and settle records from the inbound pending queue",
+    )
+    queue_actions = queue.add_subparsers(dest="queue_action", required=True)
+    claim = queue_actions.add_parser("claim", help="lease the oldest available message")
+    claim.add_argument("--worker-id", required=True, help="stable consumer worker identifier")
+    claim.add_argument(
+        "--lease-seconds",
+        type=int,
+        default=300,
+        help="seconds before an unacknowledged claim can be redelivered",
+    )
+    ack = queue_actions.add_parser("ack", help="mark an owned claim as completed")
+    ack.add_argument("--worker-id", required=True, help="claim owner identifier")
+    ack.add_argument("--fingerprint", required=True, help="claimed message fingerprint")
+    fail = queue_actions.add_parser("fail", help="release or dead-letter an owned claim")
+    fail.add_argument("--worker-id", required=True, help="claim owner identifier")
+    fail.add_argument("--fingerprint", required=True, help="claimed message fingerprint")
+    fail.add_argument("--reason", required=True, help="failure reason; only its hash is stored")
+    fail.add_argument(
+        "--max-attempts",
+        type=int,
+        default=3,
+        help="dead-letter the message after this many claims",
     )
 
     reply = subcommands.add_parser(
@@ -220,6 +248,39 @@ def main(argv: list[str] | None = None) -> int:
                 }
             )
             return 0
+
+        if args.command == "queue":
+            consumer = QueueConsumer(
+                config.inbound.queue_file,
+                config.inbound.consumer_state_file,
+            )
+            if args.queue_action == "claim":
+                claim = consumer.claim(
+                    args.worker_id,
+                    lease_seconds=args.lease_seconds,
+                )
+                _print(
+                    {
+                        "type": "xianyu_queue_claim",
+                        "claimed": claim is not None,
+                        **(claim or {}),
+                    }
+                )
+                return 0
+            if args.queue_action == "ack":
+                result = consumer.ack(args.fingerprint, args.worker_id)
+                _print({"type": "xianyu_queue_ack", **result})
+                return 0
+            if args.queue_action == "fail":
+                result = consumer.fail(
+                    args.fingerprint,
+                    args.worker_id,
+                    args.reason,
+                    max_attempts=args.max_attempts,
+                )
+                _print({"type": "xianyu_queue_fail", **result})
+                return 0
+            raise AssertionError(f"unhandled queue action: {args.queue_action}")
 
         device = Uiautomator2Device(config)
         if args.command == "unread":

@@ -46,6 +46,7 @@ class InboundSettings:
     notification_state_file: Path
     queue_state_file: Path
     queue_file: Path
+    consumer_state_file: Path
 
 
 @dataclass(frozen=True)
@@ -177,6 +178,13 @@ def load_config(path: str | Path) -> AutomationConfig:
                     / inbound_raw.get(
                         "queue_file",
                         "var/inbound-pending.jsonl",
+                    )
+                ).resolve(),
+                consumer_state_file=(
+                    base
+                    / inbound_raw.get(
+                        "consumer_state_file",
+                        "var/inbound-consumer-state.json",
                     )
                 ).resolve(),
             ),

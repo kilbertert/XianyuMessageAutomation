@@ -25,6 +25,7 @@ CLI
  ├─ NotificationMonitor   baseline, deduplication, and JSONL event stream
  ├─ InboundPoller         route-after-detect with acknowledge-after-queue
  ├─ InboundWorkflow       exact notification, body extraction, pending queue
+ ├─ QueueConsumer         leased claim, explicit acknowledgement, dead letters
  ├─ ReplyWorkflow         invariants and single-send state machine
  └─ StateStore            atomic hash-only duplicate ledger
 ```
@@ -45,6 +46,29 @@ The workflow depends on `DevicePort`, so tests can prove sending invariants with
 - Inbound routing acknowledges a notification only after its body is queued.
 - A notification title must match exactly once before any click.
 - Inbound routing returns to Home and verifies the focused system window.
+- A queue record remains pending until its owning worker explicitly acknowledges it.
+- Expired leases are redelivered, so consumers must handle messages idempotently.
+- Queue claim, acknowledgement, and failure transitions share an OS file lock.
+- Repeated failures become dead letters at the configured attempt limit.
+- Consumer state stores lifecycle metadata and failure hashes, never sender or body plaintext.
+
+## Pending queue semantics
+
+`var/inbound-pending.jsonl` is an append-only local message log. `QueueConsumer` keeps a separate
+hash-keyed state machine in `var/inbound-consumer-state.json`:
+
+```text
+unseen/pending -> processing --ack--> done
+                       |
+                       +--fail below limit--> pending
+                       +--fail at limit-----> dead
+                       +--lease expires-----> processing on a later claim
+```
+
+This provides at-least-once delivery. A worker receives the complete queue record from `claim`,
+but the consumer state and lock files contain no message plaintext. The local file-backed design
+fits the current single-device deployment and supports concurrent local worker processes; it is
+not a distributed broker across multiple hosts.
 
 ## Current device-specific boundary
 

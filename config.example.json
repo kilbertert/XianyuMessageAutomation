@@ -33,7 +33,8 @@
   "inbound": {
     "notification_state_file": "var/inbound-notification-state.json",
     "queue_state_file": "var/inbound-queue-state.json",
-    "queue_file": "var/inbound-pending.jsonl"
+    "queue_file": "var/inbound-pending.jsonl",
+    "consumer_state_file": "var/inbound-consumer-state.json"
   },
   "delete_key_count": 80
 }

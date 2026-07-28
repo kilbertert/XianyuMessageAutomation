@@ -46,6 +46,40 @@ Notification acknowledgement happens only after successful queueing. A routing o
 failure therefore remains eligible for a later retry. The workflow never enters text or clicks
 Send.
 
+## Pending queue consumption
+
+Claim the oldest available message with a stable worker identifier:
+
+```powershell
+.\.venv\Scripts\xianyu-msg.exe --config config.json queue claim `
+  --worker-id reply-policy-1 `
+  --lease-seconds 300
+```
+
+The claim output includes the complete message record, attempt number, owner, and lease deadline.
+After the downstream operation succeeds, acknowledge the fingerprint with the same owner:
+
+```powershell
+.\.venv\Scripts\xianyu-msg.exe --config config.json queue ack `
+  --worker-id reply-policy-1 `
+  --fingerprint MESSAGE_SHA256
+```
+
+On a failed downstream operation, release it for another attempt:
+
+```powershell
+.\.venv\Scripts\xianyu-msg.exe --config config.json queue fail `
+  --worker-id reply-policy-1 `
+  --fingerprint MESSAGE_SHA256 `
+  --reason "downstream unavailable" `
+  --max-attempts 3
+```
+
+Only the current lease owner may acknowledge or fail a message. Unacknowledged leases expire and
+are redelivered with an incremented attempt count. A failure at the attempt limit changes the
+record to `dead`; it will no longer be claimed automatically. The failure reason is emitted to
+the command only as SHA-256 and is not stored as plaintext.
+
 ## Output
 
 Each event contains:

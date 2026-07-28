@@ -93,6 +93,7 @@ def _config(tmp_path) -> AutomationConfig:
             notification_state_file=tmp_path / "inbound-notification-state.json",
             queue_state_file=tmp_path / "inbound-queue-state.json",
             queue_file=tmp_path / "inbound-pending.jsonl",
+            consumer_state_file=tmp_path / "inbound-consumer-state.json",
         ),
         delete_key_count=0,
     )
