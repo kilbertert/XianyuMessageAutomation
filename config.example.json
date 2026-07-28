@@ -30,5 +30,10 @@
       "mipush|com.taobao.idlefish|107787"
     ]
   },
+  "inbound": {
+    "notification_state_file": "var/inbound-notification-state.json",
+    "queue_state_file": "var/inbound-queue-state.json",
+    "queue_file": "var/inbound-pending.jsonl"
+  },
   "delete_key_count": 80
 }

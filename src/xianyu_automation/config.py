@@ -42,6 +42,13 @@ class NotificationSettings:
 
 
 @dataclass(frozen=True)
+class InboundSettings:
+    notification_state_file: Path
+    queue_state_file: Path
+    queue_file: Path
+
+
+@dataclass(frozen=True)
 class AutomationConfig:
     serial: str
     adb_path: str
@@ -51,6 +58,7 @@ class AutomationConfig:
     coordinates: CoordinateSettings
     timings: TimingSettings
     notifications: NotificationSettings
+    inbound: InboundSettings
     delete_key_count: int
 
 
@@ -80,6 +88,7 @@ def load_config(path: str | Path) -> AutomationConfig:
         coordinates_raw = raw["coordinates"]
         timings_raw = raw["timings"]
         notifications_raw = raw.get("notifications", {})
+        inbound_raw = raw.get("inbound", {})
         base = config_path.parent
 
         serial = str(raw["serial"]).strip()
@@ -147,6 +156,29 @@ def load_config(path: str | Path) -> AutomationConfig:
                     for channel in message_channels_raw
                     if str(channel).strip()
                 ),
+            ),
+            inbound=InboundSettings(
+                notification_state_file=(
+                    base
+                    / inbound_raw.get(
+                        "notification_state_file",
+                        "var/inbound-notification-state.json",
+                    )
+                ).resolve(),
+                queue_state_file=(
+                    base
+                    / inbound_raw.get(
+                        "queue_state_file",
+                        "var/inbound-queue-state.json",
+                    )
+                ).resolve(),
+                queue_file=(
+                    base
+                    / inbound_raw.get(
+                        "queue_file",
+                        "var/inbound-pending.jsonl",
+                    )
+                ).resolve(),
             ),
             delete_key_count=delete_key_count,
         )

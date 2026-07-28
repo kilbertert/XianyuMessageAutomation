@@ -4,6 +4,7 @@ from xianyu_automation.config import (
     AppSettings,
     AutomationConfig,
     CoordinateSettings,
+    InboundSettings,
     NotificationSettings,
     TimingSettings,
 )
@@ -87,6 +88,11 @@ def _config(tmp_path) -> AutomationConfig:
             event_log=tmp_path / "notifications.jsonl",
             poll_seconds=1,
             message_channel_ids=("message-channel",),
+        ),
+        inbound=InboundSettings(
+            notification_state_file=tmp_path / "inbound-notification-state.json",
+            queue_state_file=tmp_path / "inbound-queue-state.json",
+            queue_file=tmp_path / "inbound-pending.jsonl",
         ),
         delete_key_count=0,
     )

@@ -23,6 +23,8 @@ CLI
  ├─ UI parser             unread and message-node parsing
  ├─ NotificationSource    incremental Android notification snapshots
  ├─ NotificationMonitor   baseline, deduplication, and JSONL event stream
+ ├─ InboundPoller         route-after-detect with acknowledge-after-queue
+ ├─ InboundWorkflow       exact notification, body extraction, pending queue
  ├─ ReplyWorkflow         invariants and single-send state machine
  └─ StateStore            atomic hash-only duplicate ledger
 ```
@@ -40,6 +42,9 @@ The workflow depends on `DevicePort`, so tests can prove sending invariants with
 - Private screenshots are retained only with `--keep-artifacts`.
 - Notification monitoring never opens a conversation or sends a reply.
 - Notification source keys and deduplication state are stored as hashes.
+- Inbound routing acknowledges a notification only after its body is queued.
+- A notification title must match exactly once before any click.
+- Inbound routing returns to Home and verifies the focused system window.
 
 ## Current device-specific boundary
 
@@ -56,7 +61,7 @@ resolution, font-scale, or keyboard change.
 ## Next milestones
 
 1. Native `NotificationListenerService` helper to replace ADB polling.
-2. Resolve a notification to the exact conversation, with chat-marker verification.
+2. Burst-message reconciliation when Xianyu aggregates several messages.
 3. Rule-based response policy and manual escalation.
 4. A bounded worker loop with heartbeat, cooldown, and circuit breaker.
 5. Regression fixtures for each supported Xianyu version.

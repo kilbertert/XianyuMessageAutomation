@@ -75,6 +75,23 @@ This validates notification arrival detection and exact chat routing on the test
 does not expose the message body in the notification itself, so reading the exact body requires
 opening the notification and consequently marks the conversation as read.
 
+### Pending-queue end to end
+
+A second owned account sent `AUTO_e2e_003` while the new `inbox` command was running:
+
+- the chat notification was detected automatically;
+- the masked sender title matched exactly once;
+- notification routing opened the expected Flutter chat activity;
+- the latest left-side inbound body was `auto_e2e_003`;
+- one result with status `queued` and `sent_clicks: 0` was emitted;
+- `var/inbound-pending.jsonl` contained exactly one record;
+- a second inbox snapshot queued zero records;
+- queue state contained no sender or message plaintext;
+- Android `dumpsys window` confirmed the focused app was the Xiaomi launcher after routing.
+
+This validates the single-notification, latest-visible-message pipeline. Burst aggregation beyond
+the visible chat viewport remains a known limit.
+
 ## What this proves
 
 This validates the controlled single-conversation path, the Chinese IME flow, post-send

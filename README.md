@@ -7,6 +7,7 @@
 - ADB、设备和小米输入权限检查；
 - 闲鱼未读数量读取；
 - 闲鱼系统通知增量监控与本地 JSONL 事件流；
+- 通知唯一定位、精确会话打开与最新入站正文队列；
 - 消息列表截图与会话行校准；
 - 聊天正文 marker 唯一校验；
 - 默认 dry-run；
@@ -59,6 +60,17 @@ Copy-Item config.example.json config.json
 可使用 `monitor --once --include-existing`。默认仅输出交易聊天消息；排查其他闲鱼通知时
 显式增加 `--all-notifications`。监控只识别和记录事件，不会打开聊天或发送回复。
 
+持续把新消息正文写入待处理队列：
+
+```powershell
+.\.venv\Scripts\xianyu-msg.exe --config config.json inbox `
+  --interval 0.5
+```
+
+`inbox` 会以现有通知建立基线。之后出现聊天通知时，它要求发送者标题唯一，打开对应
+聊天、提取最新左侧入站气泡、写入 `var/inbound-pending.jsonl`，再返回桌面。整个流程
+不输入文字、不点击发送；打开聊天会把会话标记为已读。
+
 保存消息列表截图，用于读取目标会话行中心的 Y 坐标：
 
 ```powershell
@@ -92,6 +104,7 @@ Copy-Item config.example.json config.json
 `var/state.json` 只保存 marker/会话提示的 SHA-256 指纹、发送时间和回复哈希，不保存聊天正文。
 通知去重状态同样只保存哈希；`var/inbound-notifications.jsonl` 会保存通知标题和正文，
 仅用于本机消息路由，整个 `var/` 目录不会提交到 Git。
+`var/inbound-pending.jsonl` 保存已提取的待处理消息正文；对应状态文件只保存哈希。
 
 重要状态：
 

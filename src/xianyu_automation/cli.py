@@ -9,6 +9,7 @@ from .config import load_config
 from .device import Uiautomator2Device
 from .doctor import AdbDoctor
 from .errors import AutomationError
+from .inbound import InboundPoller, InboundQueue, InboundWorkflow
 from .models import ReplyRequest, ReplyStatus
 from .monitor import JsonlEventSink, NotificationMonitor, NotificationStateStore
 from .notifications import AdbNotificationSource
@@ -49,6 +50,20 @@ def _parser() -> argparse.ArgumentParser:
         "--all-notifications",
         action="store_true",
         help="include non-message Xianyu notifications for diagnostics",
+    )
+
+    inbox = subcommands.add_parser(
+        "inbox",
+        help="route new Xianyu notifications and queue the latest inbound body",
+    )
+    inbox_mode = inbox.add_mutually_exclusive_group()
+    inbox_mode.add_argument("--once", action="store_true", help="read one notification snapshot")
+    inbox_mode.add_argument("--duration", type=float, help="watch for this many seconds")
+    inbox.add_argument("--interval", type=float, help="poll interval in seconds")
+    inbox.add_argument(
+        "--include-existing",
+        action="store_true",
+        help="route active notifications on the first snapshot",
     )
 
     reply = subcommands.add_parser(
@@ -145,6 +160,63 @@ def main(argv: list[str] | None = None) -> int:
                     "type": "summary",
                     "emitted": emitted,
                     "event_log": str(config.notifications.event_log),
+                }
+            )
+            return 0
+
+        if args.command == "inbox":
+            interval = args.interval or config.notifications.poll_seconds
+            if interval <= 0:
+                raise ValueError("inbox interval must be positive")
+            if args.duration is not None and args.duration <= 0:
+                raise ValueError("inbox duration must be positive")
+            workflow = InboundWorkflow(
+                Uiautomator2Device(config),
+                InboundQueue(
+                    config.inbound.queue_state_file,
+                    config.inbound.queue_file,
+                ),
+            )
+            poller = InboundPoller(
+                AdbNotificationSource(config),
+                NotificationStateStore(config.inbound.notification_state_file),
+                workflow,
+            )
+            queued = 0
+            if args.once:
+                results = poller.poll(include_existing=args.include_existing)
+                for result in results:
+                    print(
+                        json.dumps(
+                            {"type": "xianyu_inbound", **result.to_dict()},
+                            ensure_ascii=False,
+                        ),
+                        flush=True,
+                    )
+                    queued += result.status == "queued"
+            else:
+                try:
+                    stream = poller.watch(
+                        interval_seconds=interval,
+                        duration_seconds=args.duration,
+                        include_existing=args.include_existing,
+                    )
+                    for result in stream:
+                        print(
+                            json.dumps(
+                                {"type": "xianyu_inbound", **result.to_dict()},
+                                ensure_ascii=False,
+                            ),
+                            flush=True,
+                        )
+                        queued += result.status == "queued"
+                except KeyboardInterrupt:
+                    pass
+            _print(
+                {
+                    "type": "summary",
+                    "queued": queued,
+                    "queue_file": str(config.inbound.queue_file),
                 }
             )
             return 0

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import time
 from pathlib import Path
 from typing import Protocol
@@ -28,6 +29,12 @@ class DevicePort(Protocol):
 
     def return_to_messages(self) -> str: ...
 
+    def open_notification(self, title: str) -> str: ...
+
+    def display_size(self) -> tuple[int, int]: ...
+
+    def return_home(self) -> None: ...
+
 
 class Uiautomator2Device:
     def __init__(self, config: AutomationConfig):
@@ -45,6 +52,9 @@ class Uiautomator2Device:
     def _size(self) -> tuple[int, int]:
         info = self._device.info
         return int(info["displayWidth"]), int(info["displayHeight"])
+
+    def display_size(self) -> tuple[int, int]:
+        return self._size()
 
     def _click_ratio(self, point: tuple[float, float]) -> None:
         width, height = self._size()
@@ -138,3 +148,63 @@ class Uiautomator2Device:
 
     def return_to_messages(self) -> str:
         return self.navigate_to_messages()
+
+    def open_notification(self, title: str) -> str:
+        if not title:
+            raise DeviceStateError("notification title must not be empty")
+        self._device.open_notification()
+        time.sleep(self.config.timings.page_seconds)
+
+        selector = self._device(text=title)
+        count = int(selector.count)
+        if count == 0:
+            selector = self._device(description=title)
+            count = int(selector.count)
+        if count != 1:
+            self._device.press("back")
+            raise DeviceStateError(
+                f"notification title is not unique: {title!r} matched {count}"
+            )
+
+        selector.click()
+        deadline = time.monotonic() + self.config.timings.page_seconds + 5
+        while time.monotonic() < deadline:
+            if self._current_activity() == self.config.app.chat_activity:
+                time.sleep(1)
+                return self.dump_hierarchy()
+            time.sleep(self.config.timings.poll_seconds)
+        raise DeviceStateError(
+            "notification did not open a chat; "
+            f"current activity is {self._current_activity()}"
+        )
+
+    def return_home(self) -> None:
+        self._device.press("home")
+        time.sleep(1)
+        process = subprocess.run(
+            [
+                self.config.adb_path,
+                "-s",
+                self.config.serial,
+                "shell",
+                "dumpsys",
+                "window",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if process.returncode != 0:
+            detail = process.stderr.strip() or "unknown adb error"
+            raise DeviceStateError(f"cannot verify foreground window: {detail}")
+        focus = "\n".join(
+            line
+            for line in process.stdout.splitlines()
+            if "mCurrentFocus=" in line or "mFocusedApp=" in line
+        )
+        if not focus:
+            raise DeviceStateError("cannot verify foreground window after Home")
+        if self.config.app.package in focus:
+            raise DeviceStateError("Xianyu remained in the foreground after Home")

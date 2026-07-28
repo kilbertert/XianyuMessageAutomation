@@ -74,3 +74,35 @@ class NotificationEvent:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+class InboundStatus(StrEnum):
+    QUEUED = "queued"
+    SKIPPED_DUPLICATE = "skipped_duplicate"
+
+
+@dataclass(frozen=True)
+class InboundMessage:
+    fingerprint: str
+    notification_fingerprint: str
+    sender: str
+    body: str
+    observed_at: str
+    queued_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class InboundResult:
+    status: InboundStatus
+    fingerprint: str
+    sender: str
+    body: str
+    sent_clicks: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        result = asdict(self)
+        result["status"] = self.status.value
+        return result

@@ -25,6 +25,27 @@ not replayed. Use the following diagnostic command to include them:
 Non-message Xianyu channels are filtered by default. Add `--all-notifications` only when
 diagnosing channel classification.
 
+## Routing and pending queue
+
+The `inbox` command composes notification detection with controlled UI routing:
+
+```powershell
+.\.venv\Scripts\xianyu-msg.exe --config config.json inbox --interval 0.5
+```
+
+For every new message candidate it:
+
+1. requires exactly one notification title match;
+2. opens the notification and requires Xianyu's chat activity;
+3. extracts the latest visible left-anchored chat message;
+4. appends one idempotent record to `var/inbound-pending.jsonl`;
+5. records hash-only queue and notification state;
+6. presses Home and verifies the focused window through Android `dumpsys window`.
+
+Notification acknowledgement happens only after successful queueing. A routing or extraction
+failure therefore remains eligible for a later retry. The workflow never enters text or clicks
+Send.
+
 ## Output
 
 Each event contains:
@@ -47,6 +68,9 @@ treated as private local data; `var/` is ignored by Git.
 - Xianyu exposes a generic `发来一条新消息` notification instead of the message body.
 - Opening the notification can resolve the exact chat, but marks that conversation as read.
 - Notification detection never triggers a reply.
+- The current extractor queues the latest visible incoming bubble per notification. If Xianyu
+  aggregates a burst that exceeds the visible chat viewport, intermediate messages may be missed.
+- Masked sender titles must be unique in the notification shade; ambiguous titles fail closed.
 
 The durable production replacement is a small Android companion app based on
 `NotificationListenerService`. Android requires the user to grant notification-listener access;
