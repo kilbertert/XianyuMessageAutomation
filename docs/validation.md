@@ -57,6 +57,24 @@ notification was posted during that window, so a real inbound-notification event
 claimed as validated. Parser, baseline, update, hash-only state, JSONL, and duplicate suppression
 are covered by automated tests.
 
+### Real inbound notification
+
+A second owned account later sent `AUTO_e2e_002` while Xianyu was backgrounded:
+
+- one event was emitted from `mipush|com.taobao.idlefish|107787`;
+- the notification title identified the masked sender and Android exposed the generic text
+  `发来一条新消息`;
+- a second snapshot emitted zero events, proving duplicate suppression;
+- the JSONL log contained one event and the state file contained no plaintext;
+- clicking the unique notification opened
+  `com.idlefish.flutterbridge.flutterboost.boost.FishFlutterBoostActivity`;
+- `AUTO_e2e_002` appeared exactly once in the chat accessibility tree;
+- no Send click occurred.
+
+This validates notification arrival detection and exact chat routing on the tested device. Xianyu
+does not expose the message body in the notification itself, so reading the exact body requires
+opening the notification and consequently marks the conversation as read.
+
 ## What this proves
 
 This validates the controlled single-conversation path, the Chinese IME flow, post-send

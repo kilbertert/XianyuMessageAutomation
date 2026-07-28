@@ -44,7 +44,9 @@ treated as private local data; `var/` is ignored by Git.
 - Android and Xianyu notification permission must remain enabled.
 - Polling can miss a notification that is posted and removed entirely between polls.
 - Xianyu may aggregate several messages into one updated notification.
-- Notification detection does not yet resolve the exact chat or trigger a reply.
+- Xianyu exposes a generic `发来一条新消息` notification instead of the message body.
+- Opening the notification can resolve the exact chat, but marks that conversation as read.
+- Notification detection never triggers a reply.
 
 The durable production replacement is a small Android companion app based on
 `NotificationListenerService`. Android requires the user to grant notification-listener access;

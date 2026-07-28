@@ -78,7 +78,14 @@ def _print(data: object) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2))
 
 
+def _configure_stdout() -> None:
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _configure_stdout()
     args = _parser().parse_args(argv)
     try:
         config = load_config(args.config)
