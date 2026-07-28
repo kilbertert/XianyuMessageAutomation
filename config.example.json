@@ -1,0 +1,26 @@
+{
+  "serial": "YOUR_DEVICE_SERIAL",
+  "adb_path": "adb",
+  "state_file": "var/state.json",
+  "artifact_dir": "var/artifacts",
+  "app": {
+    "package": "com.taobao.idlefish",
+    "main_activity": ".maincontainer.activity.MainActivity",
+    "chat_activity": "com.idlefish.flutterbridge.flutterboost.boost.FishFlutterBoostActivity"
+  },
+  "coordinates": {
+    "message_tab": [0.705, 0.953],
+    "conversation_x": 0.463,
+    "input": [0.463, 0.942],
+    "candidate_commit": [0.417, 0.640],
+    "send": [0.903, 0.546]
+  },
+  "timings": {
+    "app_start_seconds": 5.0,
+    "page_seconds": 5.0,
+    "input_seconds": 2.0,
+    "send_timeout_seconds": 12.0,
+    "poll_seconds": 0.75
+  },
+  "delete_key_count": 80
+}

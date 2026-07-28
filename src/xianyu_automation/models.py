@@ -1,0 +1,58 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+from enum import StrEnum
+from typing import Any
+
+
+@dataclass(frozen=True)
+class Bounds:
+    left: int
+    top: int
+    right: int
+    bottom: int
+
+
+@dataclass(frozen=True)
+class TextNode:
+    value: str
+    bounds: Bounds | None
+    class_name: str
+    clickable: bool
+
+
+class ReplyStatus(StrEnum):
+    DRY_RUN_READY = "dry_run_ready"
+    SENT = "sent"
+    SKIPPED_DUPLICATE = "skipped_duplicate"
+    TARGET_MISSING = "target_missing"
+    TARGET_NOT_UNIQUE = "target_not_unique"
+    SEND_UNCONFIRMED = "send_unconfirmed"
+
+
+@dataclass(frozen=True)
+class ReplyRequest:
+    marker: str
+    reply: str
+    apply: bool = False
+    conversation_y: int | None = None
+    current_chat: bool = False
+    keep_artifacts: bool = False
+
+
+@dataclass(frozen=True)
+class ReplyResult:
+    status: ReplyStatus
+    marker_count: int
+    reply_count: int
+    sent_clicks: int
+    fingerprint: str
+    unread_before: int | None = None
+    unread_after: int | None = None
+    artifacts: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        result = asdict(self)
+        result["status"] = self.status.value
+        result["artifacts"] = list(self.artifacts)
+        return result
