@@ -34,6 +34,14 @@ class TimingSettings:
 
 
 @dataclass(frozen=True)
+class NotificationSettings:
+    state_file: Path
+    event_log: Path
+    poll_seconds: float
+    message_channel_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class AutomationConfig:
     serial: str
     adb_path: str
@@ -42,6 +50,7 @@ class AutomationConfig:
     app: AppSettings
     coordinates: CoordinateSettings
     timings: TimingSettings
+    notifications: NotificationSettings
     delete_key_count: int
 
 
@@ -70,6 +79,7 @@ def load_config(path: str | Path) -> AutomationConfig:
         app_raw = raw["app"]
         coordinates_raw = raw["coordinates"]
         timings_raw = raw["timings"]
+        notifications_raw = raw.get("notifications", {})
         base = config_path.parent
 
         serial = str(raw["serial"]).strip()
@@ -83,6 +93,14 @@ def load_config(path: str | Path) -> AutomationConfig:
         delete_key_count = int(raw.get("delete_key_count", 80))
         if delete_key_count < 0:
             raise ConfigurationError("delete_key_count must be non-negative")
+        notification_poll_seconds = float(notifications_raw.get("poll_seconds", 1.0))
+        if notification_poll_seconds <= 0:
+            raise ConfigurationError("notifications.poll_seconds must be positive")
+        message_channels_raw = notifications_raw.get("message_channel_ids", [])
+        if not isinstance(message_channels_raw, list):
+            raise ConfigurationError(
+                "notifications.message_channel_ids must be a JSON array"
+            )
 
         return AutomationConfig(
             serial=serial,
@@ -109,6 +127,26 @@ def load_config(path: str | Path) -> AutomationConfig:
                 input_seconds=float(timings_raw["input_seconds"]),
                 send_timeout_seconds=float(timings_raw["send_timeout_seconds"]),
                 poll_seconds=float(timings_raw["poll_seconds"]),
+            ),
+            notifications=NotificationSettings(
+                state_file=(
+                    base
+                    / notifications_raw.get(
+                        "state_file", "var/notification-state.json"
+                    )
+                ).resolve(),
+                event_log=(
+                    base
+                    / notifications_raw.get(
+                        "event_log", "var/inbound-notifications.jsonl"
+                    )
+                ).resolve(),
+                poll_seconds=notification_poll_seconds,
+                message_channel_ids=tuple(
+                    str(channel).strip()
+                    for channel in message_channels_raw
+                    if str(channel).strip()
+                ),
             ),
             delete_key_count=delete_key_count,
         )

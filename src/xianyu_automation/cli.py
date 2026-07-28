@@ -10,6 +10,8 @@ from .device import Uiautomator2Device
 from .doctor import AdbDoctor
 from .errors import AutomationError
 from .models import ReplyRequest, ReplyStatus
+from .monitor import JsonlEventSink, NotificationMonitor, NotificationStateStore
+from .notifications import AdbNotificationSource
 from .parser import unread_count
 from .store import StateStore
 from .workflow import ReplyWorkflow
@@ -30,6 +32,24 @@ def _parser() -> argparse.ArgumentParser:
         "screenshot-list", help="capture the message list for local row calibration"
     )
     screenshot.add_argument("--output", required=True, help="PNG output path")
+
+    monitor = subcommands.add_parser(
+        "monitor", help="watch Android notifications for new Xianyu events"
+    )
+    mode = monitor.add_mutually_exclusive_group()
+    mode.add_argument("--once", action="store_true", help="read one notification snapshot")
+    mode.add_argument("--duration", type=float, help="watch for this many seconds")
+    monitor.add_argument("--interval", type=float, help="poll interval in seconds")
+    monitor.add_argument(
+        "--include-existing",
+        action="store_true",
+        help="emit active notifications on the first snapshot",
+    )
+    monitor.add_argument(
+        "--all-notifications",
+        action="store_true",
+        help="include non-message Xianyu notifications for diagnostics",
+    )
 
     reply = subcommands.add_parser(
         "reply", help="verify a marker and optionally send exactly one reply"
@@ -58,7 +78,14 @@ def _print(data: object) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2))
 
 
+def _configure_stdout() -> None:
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _configure_stdout()
     args = _parser().parse_args(argv)
     try:
         config = load_config(args.config)
@@ -66,6 +93,61 @@ def main(argv: list[str] | None = None) -> int:
             result = AdbDoctor(config).inspect()
             _print(result)
             return 0 if result.get("ok") else 2
+
+        if args.command == "monitor":
+            interval = args.interval or config.notifications.poll_seconds
+            if interval <= 0:
+                raise ValueError("monitor interval must be positive")
+            if args.duration is not None and args.duration <= 0:
+                raise ValueError("monitor duration must be positive")
+            monitor = NotificationMonitor(
+                AdbNotificationSource(config),
+                NotificationStateStore(config.notifications.state_file),
+                JsonlEventSink(config.notifications.event_log),
+            )
+            emitted = 0
+            message_only = not args.all_notifications
+            if args.once:
+                events = monitor.poll(
+                    emit_existing=args.include_existing,
+                    message_only=message_only,
+                )
+                for event in events:
+                    print(
+                        json.dumps(
+                            {"type": "xianyu_message", **event.to_dict()},
+                            ensure_ascii=False,
+                        ),
+                        flush=True,
+                    )
+                    emitted += 1
+            else:
+                try:
+                    stream = monitor.watch(
+                        interval_seconds=interval,
+                        duration_seconds=args.duration,
+                        include_existing=args.include_existing,
+                        message_only=message_only,
+                    )
+                    for event in stream:
+                        print(
+                            json.dumps(
+                                {"type": "xianyu_message", **event.to_dict()},
+                                ensure_ascii=False,
+                            ),
+                            flush=True,
+                        )
+                        emitted += 1
+                except KeyboardInterrupt:
+                    pass
+            _print(
+                {
+                    "type": "summary",
+                    "emitted": emitted,
+                    "event_log": str(config.notifications.event_log),
+                }
+            )
+            return 0
 
         device = Uiautomator2Device(config)
         if args.command == "unread":

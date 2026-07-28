@@ -22,5 +22,13 @@
     "send_timeout_seconds": 12.0,
     "poll_seconds": 0.75
   },
+  "notifications": {
+    "state_file": "var/notification-state.json",
+    "event_log": "var/inbound-notifications.jsonl",
+    "poll_seconds": 1.0,
+    "message_channel_ids": [
+      "mipush|com.taobao.idlefish|107787"
+    ]
+  },
   "delete_key_count": 80
 }

@@ -56,3 +56,21 @@ class ReplyResult:
         result["status"] = self.status.value
         result["artifacts"] = list(self.artifacts)
         return result
+
+
+@dataclass(frozen=True)
+class NotificationEvent:
+    fingerprint: str
+    source_key_sha256: str
+    package: str
+    channel: str | None
+    category: str | None
+    update_time_ms: int | None
+    observed_at: str
+    title: str | None
+    text: str | None
+    big_text: str | None
+    message_candidate: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
