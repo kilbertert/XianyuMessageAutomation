@@ -21,6 +21,8 @@ CLI
  ├─ AdbDoctor             device/app preflight
  ├─ Uiautomator2Device    Android UI adapter
  ├─ UI parser             unread and message-node parsing
+ ├─ NotificationSource    incremental Android notification snapshots
+ ├─ NotificationMonitor   baseline, deduplication, and JSONL event stream
  ├─ ReplyWorkflow         invariants and single-send state machine
  └─ StateStore            atomic hash-only duplicate ledger
 ```
@@ -36,6 +38,8 @@ The workflow depends on `DevicePort`, so tests can prove sending invariants with
 - A missing post-send bubble is reported as `send_unconfirmed`; it is never retried.
 - The state file stores hashes, timestamps, and status only.
 - Private screenshots are retained only with `--keep-artifacts`.
+- Notification monitoring never opens a conversation or sends a reply.
+- Notification source keys and deduplication state are stored as hashes.
 
 ## Current device-specific boundary
 
@@ -51,8 +55,8 @@ resolution, font-scale, or keyboard change.
 
 ## Next milestones
 
-1. Notification-listener helper for exact inbound-conversation routing.
-2. OCR fallback for custom-drawn conversation lists.
+1. Native `NotificationListenerService` helper to replace ADB polling.
+2. Resolve a notification to the exact conversation, with chat-marker verification.
 3. Rule-based response policy and manual escalation.
 4. A bounded worker loop with heartbeat, cooldown, and circuit breaker.
 5. Regression fixtures for each supported Xianyu version.

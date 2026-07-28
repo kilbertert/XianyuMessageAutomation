@@ -4,6 +4,7 @@ from xianyu_automation.config import (
     AppSettings,
     AutomationConfig,
     CoordinateSettings,
+    NotificationSettings,
     TimingSettings,
 )
 from xianyu_automation.models import ReplyRequest, ReplyStatus
@@ -81,6 +82,12 @@ def _config(tmp_path) -> AutomationConfig:
             send=(0.9, 0.5),
         ),
         timings=TimingSettings(0, 0, 0, 1, 0),
+        notifications=NotificationSettings(
+            state_file=tmp_path / "notification-state.json",
+            event_log=tmp_path / "notifications.jsonl",
+            poll_seconds=1,
+            message_channel_ids=("message-channel",),
+        ),
         delete_key_count=0,
     )
 
