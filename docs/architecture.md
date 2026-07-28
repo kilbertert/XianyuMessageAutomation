@@ -26,6 +26,9 @@ CLI
  ├─ InboundPoller         route-after-detect with acknowledge-after-queue
  ├─ InboundWorkflow       exact notification, body extraction, pending queue
  ├─ QueueConsumer         leased claim, explicit acknowledgement, dead letters
+ ├─ GatewayWorkflow       synchronous server decision and current-chat delivery
+ ├─ GatewayClient         HMAC-signed event and receipt transport over Tailscale
+ ├─ GatewayDeliveryStore  crash-recoverable, at-most-once UI-send ledger
  ├─ ReplyWorkflow         invariants and single-send state machine
  └─ StateStore            atomic hash-only duplicate ledger
 ```
@@ -51,6 +54,27 @@ The workflow depends on `DevicePort`, so tests can prove sending invariants with
 - Queue claim, acknowledgement, and failure transitions share an OS file lock.
 - Repeated failures become dead letters at the configured attempt limit.
 - Consumer state stores lifecycle metadata and failure hashes, never sender or body plaintext.
+- Gateway events are decided idempotently by the server while Android keeps the exact chat open.
+- The Android gateway persists `sending` before touching the input, so recovery never re-clicks Send.
+- Gateway HTTP is accepted only over HTTPS, loopback, or a Tailscale address and is HMAC-signed.
+
+## Server gateway flow
+
+```text
+Android notification
+  -> unique notification title
+  -> current chat + latest left-side body
+  -> signed idempotent event over Tailscale
+  -> server pulls recent IM sessions and requires one exact inbound match
+  -> existing item/keyword/default/AI decision chain
+  -> Android current-chat text send
+  -> signed sent/skipped/unconfirmed receipt
+```
+
+The local pending JSONL queue remains available for receive-only integrations. It is not used for
+delayed Android replies because, after leaving the chat, the accessibility tree exposes no stable
+conversation identifier. The integrated gateway therefore makes the decision synchronously while
+the notification-opened chat is still held.
 
 ## Pending queue semantics
 
@@ -86,6 +110,6 @@ resolution, font-scale, or keyboard change.
 
 1. Native `NotificationListenerService` helper to replace ADB polling.
 2. Burst-message reconciliation when Xianyu aggregates several messages.
-3. Rule-based response policy and manual escalation.
-4. A bounded worker loop with heartbeat, cooldown, and circuit breaker.
+3. Image-reply support through a separately verified Android picker flow.
+4. A Windows service wrapper with heartbeat and alerting.
 5. Regression fixtures for each supported Xianyu version.

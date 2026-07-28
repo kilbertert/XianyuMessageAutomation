@@ -50,6 +50,18 @@ class InboundSettings:
 
 
 @dataclass(frozen=True)
+class GatewaySettings:
+    base_url: str
+    account_id: str
+    device_id: str
+    shared_secret_env: str
+    state_file: Path
+    notification_state_file: Path
+    request_timeout_seconds: float
+    max_attempts: int
+
+
+@dataclass(frozen=True)
 class AutomationConfig:
     serial: str
     adb_path: str
@@ -61,6 +73,7 @@ class AutomationConfig:
     notifications: NotificationSettings
     inbound: InboundSettings
     delete_key_count: int
+    gateway: GatewaySettings | None = None
 
 
 def _point(value: Any, name: str) -> tuple[float, float]:
@@ -90,6 +103,7 @@ def load_config(path: str | Path) -> AutomationConfig:
         timings_raw = raw["timings"]
         notifications_raw = raw.get("notifications", {})
         inbound_raw = raw.get("inbound", {})
+        gateway_raw = raw.get("gateway")
         base = config_path.parent
 
         serial = str(raw["serial"]).strip()
@@ -110,6 +124,53 @@ def load_config(path: str | Path) -> AutomationConfig:
         if not isinstance(message_channels_raw, list):
             raise ConfigurationError(
                 "notifications.message_channel_ids must be a JSON array"
+            )
+
+        gateway = None
+        if gateway_raw is not None:
+            if not isinstance(gateway_raw, dict):
+                raise ConfigurationError("gateway must be a JSON object")
+            request_timeout_seconds = float(
+                gateway_raw.get("request_timeout_seconds", 30)
+            )
+            max_attempts = int(gateway_raw.get("max_attempts", 3))
+            if request_timeout_seconds <= 0:
+                raise ConfigurationError(
+                    "gateway.request_timeout_seconds must be positive"
+                )
+            if max_attempts <= 0:
+                raise ConfigurationError("gateway.max_attempts must be positive")
+            base_url = str(gateway_raw["base_url"]).strip().rstrip("/")
+            account_id = str(gateway_raw["account_id"]).strip()
+            device_id = str(gateway_raw["device_id"]).strip()
+            shared_secret_env = str(
+                gateway_raw.get(
+                    "shared_secret_env",
+                    "ANDROID_GATEWAY_SHARED_SECRET",
+                )
+            ).strip()
+            if not all((base_url, account_id, device_id, shared_secret_env)):
+                raise ConfigurationError(
+                    "gateway base_url, account_id, device_id and shared_secret_env "
+                    "must not be empty"
+                )
+            gateway = GatewaySettings(
+                base_url=base_url,
+                account_id=account_id,
+                device_id=device_id,
+                shared_secret_env=shared_secret_env,
+                state_file=(
+                    base / gateway_raw.get("state_file", "var/gateway-state.json")
+                ).resolve(),
+                notification_state_file=(
+                    base
+                    / gateway_raw.get(
+                        "notification_state_file",
+                        "var/gateway-notification-state.json",
+                    )
+                ).resolve(),
+                request_timeout_seconds=request_timeout_seconds,
+                max_attempts=max_attempts,
             )
 
         return AutomationConfig(
@@ -189,6 +250,7 @@ def load_config(path: str | Path) -> AutomationConfig:
                 ).resolve(),
             ),
             delete_key_count=delete_key_count,
+            gateway=gateway,
         )
     except KeyError as exc:
         raise ConfigurationError(f"missing configuration field: {exc}") from exc

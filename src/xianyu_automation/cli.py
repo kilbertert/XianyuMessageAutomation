@@ -10,8 +10,9 @@ from .consumer import QueueConsumer
 from .device import Uiautomator2Device
 from .doctor import AdbDoctor
 from .errors import AutomationError
+from .gateway import GatewayClient, GatewayDeliveryStore, GatewayWorkflow
 from .inbound import InboundPoller, InboundQueue, InboundWorkflow
-from .models import ReplyRequest, ReplyStatus
+from .models import GatewayStatus, ReplyRequest, ReplyStatus
 from .monitor import JsonlEventSink, NotificationMonitor, NotificationStateStore
 from .notifications import AdbNotificationSource
 from .parser import unread_count
@@ -65,6 +66,33 @@ def _parser() -> argparse.ArgumentParser:
         "--include-existing",
         action="store_true",
         help="route active notifications on the first snapshot",
+    )
+
+    gateway = subcommands.add_parser(
+        "gateway",
+        help="route new messages to the business server and send its reply decision",
+    )
+    gateway_mode = gateway.add_mutually_exclusive_group()
+    gateway_mode.add_argument(
+        "--once",
+        action="store_true",
+        help="read one notification snapshot",
+    )
+    gateway_mode.add_argument(
+        "--duration",
+        type=float,
+        help="watch for this many seconds",
+    )
+    gateway.add_argument("--interval", type=float, help="poll interval in seconds")
+    gateway.add_argument(
+        "--include-existing",
+        action="store_true",
+        help="route active notifications on the first snapshot",
+    )
+    gateway.add_argument(
+        "--resume-current",
+        action="store_true",
+        help="resume the durable in-flight event in the already open chat",
     )
 
     queue = subcommands.add_parser(
@@ -245,6 +273,102 @@ def main(argv: list[str] | None = None) -> int:
                     "type": "summary",
                     "queued": queued,
                     "queue_file": str(config.inbound.queue_file),
+                }
+            )
+            return 0
+
+        if args.command == "gateway":
+            if config.gateway is None:
+                raise ValueError("gateway configuration is missing")
+            interval = args.interval or config.notifications.poll_seconds
+            if interval <= 0:
+                raise ValueError("gateway interval must be positive")
+            if args.duration is not None and args.duration <= 0:
+                raise ValueError("gateway duration must be positive")
+
+            device = Uiautomator2Device(config)
+            store = GatewayDeliveryStore(config.gateway.state_file)
+            workflow = GatewayWorkflow(
+                config,
+                device,
+                GatewayClient(config.gateway),
+                store,
+            )
+
+            if args.resume_current:
+                result = workflow.resume()
+                _print({"type": "xianyu_gateway", **result.to_dict()})
+                return (
+                    0
+                    if result.status
+                    in {
+                        GatewayStatus.SENT,
+                        GatewayStatus.NO_REPLY,
+                        GatewayStatus.SKIPPED_DUPLICATE,
+                    }
+                    else 2
+                )
+
+            if store.pending() is not None:
+                resumed = workflow.resume()
+                print(
+                    json.dumps(
+                        {"type": "xianyu_gateway", **resumed.to_dict()},
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+
+            poller = InboundPoller(
+                AdbNotificationSource(config),
+                NotificationStateStore(
+                    config.gateway.notification_state_file
+                ),
+                workflow,
+            )
+            processed = 0
+            sent = 0
+            no_reply = 0
+            if args.once:
+                results = poller.poll(include_existing=args.include_existing)
+                for result in results:
+                    print(
+                        json.dumps(
+                            {"type": "xianyu_gateway", **result.to_dict()},
+                            ensure_ascii=False,
+                        ),
+                        flush=True,
+                    )
+                    processed += 1
+                    sent += result.status == GatewayStatus.SENT
+                    no_reply += result.status == GatewayStatus.NO_REPLY
+            else:
+                try:
+                    stream = poller.watch(
+                        interval_seconds=interval,
+                        duration_seconds=args.duration,
+                        include_existing=args.include_existing,
+                    )
+                    for result in stream:
+                        print(
+                            json.dumps(
+                                {"type": "xianyu_gateway", **result.to_dict()},
+                                ensure_ascii=False,
+                            ),
+                            flush=True,
+                        )
+                        processed += 1
+                        sent += result.status == GatewayStatus.SENT
+                        no_reply += result.status == GatewayStatus.NO_REPLY
+                except KeyboardInterrupt:
+                    pass
+            _print(
+                {
+                    "type": "summary",
+                    "processed": processed,
+                    "sent": sent,
+                    "no_reply": no_reply,
+                    "gateway": config.gateway.base_url,
                 }
             )
             return 0

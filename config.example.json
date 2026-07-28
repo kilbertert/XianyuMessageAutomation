@@ -36,5 +36,15 @@
     "queue_file": "var/inbound-pending.jsonl",
     "consumer_state_file": "var/inbound-consumer-state.json"
   },
+  "gateway": {
+    "base_url": "http://100.96.121.55:9090",
+    "account_id": "REPLACE_WITH_SERVER_COOKIE_ID",
+    "device_id": "android-primary",
+    "shared_secret_env": "ANDROID_GATEWAY_SHARED_SECRET",
+    "state_file": "var/gateway-state.json",
+    "notification_state_file": "var/gateway-notification-state.json",
+    "request_timeout_seconds": 30,
+    "max_attempts": 3
+  },
   "delete_key_count": 80
 }

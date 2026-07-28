@@ -81,6 +81,14 @@ class InboundStatus(StrEnum):
     SKIPPED_DUPLICATE = "skipped_duplicate"
 
 
+class GatewayStatus(StrEnum):
+    SENT = "sent"
+    NO_REPLY = "no_reply"
+    SKIPPED_DUPLICATE = "skipped_duplicate"
+    UNSUPPORTED = "unsupported"
+    SEND_UNCONFIRMED = "send_unconfirmed"
+
+
 @dataclass(frozen=True)
 class InboundMessage:
     fingerprint: str
@@ -100,6 +108,22 @@ class InboundResult:
     fingerprint: str
     sender: str
     body: str
+    sent_clicks: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        result = asdict(self)
+        result["status"] = self.status.value
+        return result
+
+
+@dataclass(frozen=True)
+class GatewayResult:
+    status: GatewayStatus
+    event_id: str
+    sender: str
+    body: str
+    decision_source: str | None = None
+    reason: str | None = None
     sent_clicks: int = 0
 
     def to_dict(self) -> dict[str, Any]:

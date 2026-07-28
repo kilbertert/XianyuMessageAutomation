@@ -9,6 +9,8 @@
 - 闲鱼系统通知增量监控与本地 JSONL 事件流；
 - 通知唯一定位、精确会话打开与最新入站正文队列；
 - 待处理队列租约领取、显式确认、失败重试与死信；
+- Tailscale 私网内的签名事件投递、服务端业务决策与 Android 当前会话回复；
+- 发送前持久化边界、崩溃恢复与回执幂等；
 - 消息列表截图与会话行校准；
 - 聊天正文 marker 唯一校验；
 - 默认 dry-run；
@@ -71,6 +73,31 @@ Copy-Item config.example.json config.json
 `inbox` 会以现有通知建立基线。之后出现聊天通知时，它要求发送者标题唯一，打开对应
 聊天、提取最新左侧入站气泡、写入 `var/inbound-pending.jsonl`，再返回桌面。整个流程
 不输入文字、不点击发送；打开聊天会把会话标记为已读。
+
+把 Android 作为消息收发网关，并由服务端仓库决定回复：
+
+```powershell
+$env:ANDROID_GATEWAY_SHARED_SECRET = "与服务器相同的长随机密钥"
+.\.venv\Scripts\xianyu-msg.exe --config config.json gateway `
+  --interval 0.5
+```
+
+先在 `config.json` 中增加 `config.example.json` 所示的 `gateway` 段，并把
+`account_id` 换成服务端管理后台中的 Cookie ID。当前部署使用 Tailscale 地址
+`http://100.96.121.55:9090`；客户端拒绝向普通公网 HTTP 地址发送聊天正文。
+
+`gateway` 会在打开通知前检查服务端健康状态，打开后把正文作为幂等事件交给服务端。
+服务端主动拉取最近会话并唯一关联真实买家/商品，再复用原有商品、关键词、默认和 AI
+回复规则。文本决策在仍打开的当前聊天中只点击一次发送，随后回传结果。
+
+如果程序在服务端请求阶段失败，聊天页会保持打开且本地保留未完成阶段。由进程管理器
+重启相同命令时会自动恢复；也可显式运行：
+
+```powershell
+.\.venv\Scripts\xianyu-msg.exe --config config.json gateway --resume-current
+```
+
+如果崩溃点位于发送点击边界，恢复结果为 `send_unconfirmed`，不会自动再次点击。
 
 消费最早一条待处理消息，并获得 5 分钟租约：
 
@@ -136,6 +163,8 @@ Copy-Item config.example.json config.json
 仅用于本机消息路由，整个 `var/` 目录不会提交到 Git。
 `var/inbound-pending.jsonl` 保存已提取的待处理消息正文；对应状态文件只保存哈希。
 `var/inbound-consumer-state.json` 保存领取、完成和死信生命周期，不复制发送者或正文。
+`var/gateway-state.json` 只在事件未完成期间保存恢复所需正文；完成后只保留事件指纹、
+结果、时间和回复哈希。
 
 重要状态：
 
@@ -156,6 +185,7 @@ Copy-Item config.example.json config.json
 - [Architecture](docs/architecture.md)
 - [Device calibration](docs/device-calibration.md)
 - [Inbound detection](docs/inbound-detection.md)
+- [Server gateway integration](docs/server-gateway.md)
 - [Validation record](docs/validation.md)
 
 ## 合规与隐私

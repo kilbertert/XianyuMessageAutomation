@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xianyu-message-automation"
-version = "0.4.0"
+version = "0.5.0"
 description = "Safe, stateful Android automation for receiving and replying to messages in Xianyu."
 readme = "README.md"
 requires-python = ">=3.11"
