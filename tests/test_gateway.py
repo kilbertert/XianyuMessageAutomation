@@ -1,4 +1,5 @@
 from pathlib import Path
+import urllib.request
 
 import pytest
 
@@ -12,7 +13,7 @@ from xianyu_automation.config import (
     TimingSettings,
 )
 from xianyu_automation.errors import AutomationError
-from xianyu_automation.gateway import GatewayDeliveryStore, GatewayWorkflow
+from xianyu_automation.gateway import GatewayClient, GatewayDeliveryStore, GatewayWorkflow
 from xianyu_automation.models import GatewayStatus, NotificationEvent
 
 
@@ -81,6 +82,26 @@ def _notification() -> NotificationEvent:
         big_text=None,
         message_candidate=True,
     )
+
+
+def test_gateway_client_bypasses_environment_proxies(tmp_path, monkeypatch) -> None:
+    handlers = []
+
+    class FakeOpener:
+        pass
+
+    def build_opener(*provided_handlers):
+        handlers.extend(provided_handlers)
+        return FakeOpener()
+
+    monkeypatch.setenv("ANDROID_GATEWAY_SHARED_SECRET", "test-secret")
+    monkeypatch.setattr("urllib.request.build_opener", build_opener)
+
+    GatewayClient(_config(tmp_path).gateway)
+
+    assert len(handlers) == 1
+    assert isinstance(handlers[0], urllib.request.ProxyHandler)
+    assert handlers[0].proxies == {}
 
 
 class FakeDevice:

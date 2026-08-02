@@ -83,6 +83,7 @@ class GatewayClient:
     def __init__(self, settings: GatewaySettings):
         _validate_gateway_url(settings.base_url)
         self.settings = settings
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         self.secret = os.getenv(settings.shared_secret_env, "").strip()
         if not self.secret:
             raise AutomationError(
@@ -105,7 +106,7 @@ class GatewayClient:
             method="GET",
         )
         try:
-            with urllib.request.urlopen(
+            with self.opener.open(
                 request,
                 timeout=self.settings.request_timeout_seconds,
             ) as response:
@@ -129,7 +130,7 @@ class GatewayClient:
                 method="POST",
             )
             try:
-                with urllib.request.urlopen(
+                with self.opener.open(
                     request,
                     timeout=self.settings.request_timeout_seconds,
                 ) as response:
