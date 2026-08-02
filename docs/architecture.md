@@ -29,6 +29,7 @@ CLI
  ├─ GatewayWorkflow       synchronous server decision and current-chat delivery
  ├─ GatewayClient         HMAC-signed event and receipt transport over Tailscale
  ├─ GatewayDeliveryStore  crash-recoverable, at-most-once UI-send ledger
+ ├─ Scheduled Task        interactive-session supervisor with DPAPI secret storage
  ├─ ReplyWorkflow         invariants and single-send state machine
  └─ StateStore            atomic hash-only duplicate ledger
 ```
@@ -65,11 +66,15 @@ Android notification
   -> unique notification title
   -> current chat + latest left-side body
   -> signed idempotent event over Tailscale
-  -> server pulls recent IM sessions and requires one exact inbound match
-  -> existing item/keyword/default/AI decision chain
+  -> server builds stable hash IDs from the verified notification context
+  -> existing keyword/default/AI decision chain (no legacy WebSocket lookup)
   -> Android current-chat text send
   -> signed sent/skipped/unconfirmed receipt
 ```
+
+The Android UI does not reliably expose a real buyer ID, item ID, or WebSocket conversation ID.
+The server therefore leaves `item_id` empty and uses privacy-preserving `android:<hash>` IDs.
+Rules that require an exact item or real buyer identity intentionally do not guess a match.
 
 The local pending JSONL queue remains available for receive-only integrations. It is not used for
 delayed Android replies because, after leaving the chat, the accessibility tree exposes no stable
@@ -111,5 +116,5 @@ resolution, font-scale, or keyboard change.
 1. Native `NotificationListenerService` helper to replace ADB polling.
 2. Burst-message reconciliation when Xianyu aggregates several messages.
 3. Image-reply support through a separately verified Android picker flow.
-4. A Windows service wrapper with heartbeat and alerting.
+4. Add heartbeat and alerting to the Windows Scheduled Task supervisor.
 5. Regression fixtures for each supported Xianyu version.

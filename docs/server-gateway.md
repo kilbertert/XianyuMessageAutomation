@@ -31,8 +31,8 @@ $env:ANDROID_GATEWAY_SHARED_SECRET = "same-random-secret-as-server"
 ```
 
 The server must list the same `account_id` in `ANDROID_GATEWAY_ACCOUNT_IDS`. That account must be
-imported, enabled, and running so the server can actively pull recent conversations for
-correlation.
+imported and retain a valid Cookie. The gateway decision path does not require the legacy
+WebSocket account instance to be connected or running.
 
 ## Run
 
@@ -53,9 +53,9 @@ notification:
 - failure after opening: the chat remains open and the recovery ledger remains pending;
 - restart with a pending event: the normal gateway command resumes it before polling;
 - crash at the Send boundary: report `send_unconfirmed` and never re-click automatically;
-- non-unique server correlation: no reply;
+- missing account Cookie or policy configuration: no reply;
 - image decision: `unsupported`, no text or Send interaction;
 - duplicate event or receipt: the server returns cached state without repeating business effects.
 
-The current command is intentionally single-device and single-in-flight. A process supervisor
-should restart it after transient failures.
+The current command is intentionally single-device and single-in-flight. The provided Windows
+Scheduled Task supervisor restarts it after transient failures; see `windows-service.md`.

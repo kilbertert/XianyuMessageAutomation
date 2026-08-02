@@ -186,6 +186,7 @@ $env:ANDROID_GATEWAY_SHARED_SECRET = "与服务器相同的长随机密钥"
 - [Device calibration](docs/device-calibration.md)
 - [Inbound detection](docs/inbound-detection.md)
 - [Server gateway integration](docs/server-gateway.md)
+- [Windows persistent gateway](docs/windows-service.md)
 - [Validation record](docs/validation.md)
 
 ## 合规与隐私
