@@ -89,6 +89,102 @@ def test_open_notification_refuses_non_unique_sender_title(monkeypatch) -> None:
     assert backing.back_presses == 1
 
 
+class FakeReplyDevice:
+    def __init__(self) -> None:
+        self.ime = "com.example/.OriginalIme"
+        self.original_ime = self.ime
+        self.cleared = 0
+        self.keys: list[str] = []
+        self.sent: list[tuple[str, bool]] = []
+        self.shell_calls: list[list[str]] = []
+
+    def current_ime(self) -> str:
+        return self.ime
+
+    def is_input_ime_installed(self) -> bool:
+        return True
+
+    def set_input_ime(self, enabled: bool) -> None:
+        assert enabled
+        self.ime = "com.github.uiautomator/.AdbKeyboard"
+
+    def clear_text(self) -> None:
+        self.cleared += 1
+
+    def press(self, key: str) -> None:
+        self.keys.append(key)
+
+    def send_keys(self, value: str, clear: bool) -> None:
+        self.sent.append((value, clear))
+
+    def shell(self, command: list[str]) -> None:
+        self.shell_calls.append(command)
+        if command[:2] == ["ime", "set"]:
+            self.ime = command[2]
+
+
+def test_prepare_reply_uses_adb_keyboard_and_restores_original_ime(monkeypatch) -> None:
+    monkeypatch.setattr("xianyu_automation.device.time.sleep", lambda _: None)
+    device = object.__new__(Uiautomator2Device)
+    backing = FakeReplyDevice()
+    clicks = []
+    device._device = backing
+    device._click_ratio = clicks.append
+    device.config = SimpleNamespace(
+        coordinates=SimpleNamespace(input=(0.5, 0.9)),
+        timings=SimpleNamespace(input_seconds=0),
+        delete_key_count=2,
+    )
+
+    device.prepare_reply("ASCII reply")
+
+    assert clicks == [(0.5, 0.9)]
+    assert backing.cleared == 1
+    assert backing.keys == ["delete", "delete"]
+    assert backing.sent == [("ASCII reply", False)]
+    assert backing.current_ime() == backing.original_ime
+    assert device._reply_prepared is True
+
+
+def test_send_once_clicks_calibrated_button_after_preparation() -> None:
+    device = object.__new__(Uiautomator2Device)
+    clicks = []
+    chat_checks = []
+    device._click_ratio = clicks.append
+    device.ensure_chat = lambda: chat_checks.append(True)
+    device.config = SimpleNamespace(coordinates=SimpleNamespace(send=(0.9, 0.95)))
+    device.sent_clicks = 0
+    device._reply_prepared = True
+
+    device.send_once()
+
+    assert chat_checks == [True]
+    assert clicks == [(0.9, 0.95)]
+    assert device.sent_clicks == 1
+    assert device._reply_prepared is False
+
+
+def test_send_once_refuses_unprepared_reply() -> None:
+    device = object.__new__(Uiautomator2Device)
+    device.sent_clicks = 0
+    device._reply_prepared = False
+
+    with pytest.raises(DeviceStateError, match="not prepared"):
+        device.send_once()
+
+    assert device.sent_clicks == 0
+
+
+def test_prepare_reply_requires_attended_adb_keyboard_setup() -> None:
+    device = object.__new__(Uiautomator2Device)
+    backing = FakeReplyDevice()
+    backing.is_input_ime_installed = lambda: False
+    device._device = backing
+
+    with pytest.raises(DeviceStateError, match="attended device setup"):
+        device.prepare_reply("ASCII reply")
+
+
 class FakeHomeDevice:
     def __init__(self) -> None:
         self.pressed_keys: list[str] = []

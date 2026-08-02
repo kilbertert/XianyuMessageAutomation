@@ -13,7 +13,7 @@
     "conversation_x": 0.463,
     "input": [0.463, 0.942],
     "candidate_commit": [0.417, 0.640],
-    "send": [0.903, 0.546]
+    "send": [0.899, 0.953]
   },
   "timings": {
     "app_start_seconds": 5.0,

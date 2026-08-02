@@ -48,6 +48,7 @@ class Uiautomator2Device:
         self.config = config
         self._device = u2.connect(config.serial)
         self.sent_clicks = 0
+        self._reply_prepared = False
 
     def _size(self) -> tuple[int, int]:
         info = self._device.info
@@ -112,24 +113,43 @@ class Uiautomator2Device:
     def prepare_reply(self, reply: str, draft_screenshot: Path | None = None) -> None:
         if not reply:
             raise DeviceStateError("reply must not be empty")
+        if not self._device.is_input_ime_installed():
+            raise DeviceStateError(
+                "AdbKeyboard is not installed; complete the attended device setup"
+            )
+        self._reply_prepared = False
         self._click_ratio(self.config.coordinates.input)
         time.sleep(self.config.timings.input_seconds)
 
-        # Flutter's editable text may retain an invisible composition. Clear it
-        # defensively before injecting the requested reply.
-        self._device.clear_text()
-        for _ in range(self.config.delete_key_count):
-            self._device.press("delete")
+        previous_ime = self._device.current_ime()
+        try:
+            # The system IME can retain ASCII text as an uncommitted candidate.
+            # AdbKeyboard writes directly into Flutter's editable field.
+            self._device.set_input_ime(True)
+            self._device.clear_text()
+            for _ in range(self.config.delete_key_count):
+                self._device.press("delete")
 
-        self._device.send_keys(reply, clear=False)
-        time.sleep(self.config.timings.input_seconds)
-        if not reply.isascii():
-            self._click_ratio(self.config.coordinates.candidate_commit)
+            self._device.send_keys(reply, clear=False)
             time.sleep(self.config.timings.input_seconds)
+        finally:
+            if previous_ime:
+                self._device.shell(["ime", "enable", previous_ime])
+                self._device.shell(["ime", "set", previous_ime])
+                self._device.shell(
+                    ["settings", "put", "secure", "default_input_method", previous_ime]
+                )
+                if self._device.current_ime() != previous_ime:
+                    raise DeviceStateError("could not restore the previous input method")
+        self._reply_prepared = True
         if draft_screenshot is not None:
             self.screenshot(draft_screenshot)
 
     def send_once(self) -> None:
+        if not self._reply_prepared:
+            raise DeviceStateError("reply was not prepared")
+        self.ensure_chat()
+        self._reply_prepared = False
         self._click_ratio(self.config.coordinates.send)
         self.sent_clicks += 1
 
