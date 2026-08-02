@@ -23,6 +23,7 @@ def test_service_runs_in_interactive_user_session_and_restarts() -> None:
     assert "New-ScheduledTaskTrigger -AtLogOn" in source
     assert "-LogonType Interactive" in source
     assert "-RestartCount 999" in source
+    assert "$inheritanceFlags" in source
 
 
 def test_supervisor_uses_dpapi_secret_and_gateway_command() -> None:

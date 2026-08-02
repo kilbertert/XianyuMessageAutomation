@@ -27,17 +27,21 @@ foreach ($requiredPath in @($serviceScript, $gatewayCli, $configPath)) {
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $acl = New-Object Security.AccessControl.DirectorySecurity
 $acl.SetAccessRuleProtection($true, $false)
+$inheritanceFlags = (
+    [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+    [Security.AccessControl.InheritanceFlags]::ObjectInherit
+)
 $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
     $identity,
     [Security.AccessControl.FileSystemRights]::FullControl,
-    [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit,
+    $inheritanceFlags,
     [Security.AccessControl.PropagationFlags]::None,
     [Security.AccessControl.AccessControlType]::Allow
 )))
 $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
     "NT AUTHORITY\SYSTEM",
     [Security.AccessControl.FileSystemRights]::FullControl,
-    [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit,
+    $inheritanceFlags,
     [Security.AccessControl.PropagationFlags]::None,
     [Security.AccessControl.AccessControlType]::Allow
 )))
