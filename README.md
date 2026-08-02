@@ -1,196 +1,206 @@
-# Xianyu Message Automation
+# 闲鱼 Android 消息网关
 
-用于自有闲鱼账号消息接收与安全回复的 Android 自动化工程。
+这是一个面向**自有闲鱼账号**的 Android 消息收发网关。它通过 ADB 和
+`uiautomator2` 稳定取得闲鱼新消息、打开对应会话、执行一次文本回复，并把业务决策交给
+独立的 `xianyu-auto-reply-fix` 后台。
 
-当前版本把已经在真机验证的链路固化为可测试的 MVP：
+项目的职责边界很明确：
 
-- ADB、设备和小米输入权限检查；
-- 闲鱼未读数量读取；
-- 闲鱼系统通知增量监控与本地 JSONL 事件流；
-- 通知唯一定位、精确会话打开与最新入站正文队列；
-- 待处理队列租约领取、显式确认、失败重试与死信；
-- Tailscale 私网内的签名事件投递、服务端业务决策与 Android 当前会话回复；
-- 发送前持久化边界、崩溃恢复与回执幂等；
-- 消息列表截图与会话行校准；
-- 聊天正文 marker 唯一校验；
-- 默认 dry-run；
-- 显式 `--apply` 后只发送一次；
-- 发送后消息气泡确认；
-- 哈希去重与原子状态文件。
+- 本仓库负责 Android 通知检测、聊天页路由、消息正文读取、文本输入、单次发送和回执；
+- 9090 后台负责账号配置、Cookie、关键词、默认回复、过滤和 AI 决策；
+- Android 网关账号不依赖旧 WebSocket 消息通道，也不会与它重复发送。
 
-首版不做陌生人群发、自动营销、支付、下单或风控绕过，也不宣称已经支持无人值守扫描所有会话。
+当前版本已经在小米 13、Android 14、闲鱼 7.19.70 上完成真实
+`notification → event → decision → Android reply → sent receipt` 验收。
 
-## 环境
+## 推荐阅读顺序
 
-- Windows
-- Python 3.11+
-- Android 设备
-- ADB
-- 闲鱼 `com.taobao.idlefish`
-- 已开启“USB 调试”和“USB 调试（安全设置）”
+第一次接手项目，请按顺序阅读：
 
-## 安装
+1. [从零开始](docs/getting-started.md)：安装、手机准备、后台配置和第一次验收；
+2. [配置说明](docs/configuration.md)：逐项理解 `config.json`；
+3. [日常运维](docs/operations.md)：启动、停止、日志、升级和状态检查；
+4. [架构方案](DESIGN.md)：两个仓库的职责、主链路和一致性设计；
+5. [故障排查](docs/troubleshooting.md)：按现象定位常见问题。
+
+更深入的实现文档见[文档导航](#文档导航)。
+
+## 主链路
+
+```mermaid
+flowchart LR
+    Buyer["另一个闲鱼账号发送消息"] --> Notice["Android 闲鱼通知"]
+    Notice --> Gateway["本仓库 Android 网关"]
+    Gateway --> Event["签名幂等事件"]
+    Event --> Server["9090 xianyu-auto-reply-fix"]
+    Server --> Decision["关键词、默认或 AI 决策"]
+    Decision --> Gateway
+    Gateway --> Reply["当前聊天只点击一次发送"]
+    Reply --> Receipt["sent / skipped / send_unconfirmed 回执"]
+    Receipt --> Server
+```
+
+## 十分钟启动清单
+
+### 1. 准备环境
+
+- Windows 10/11；
+- Python 3.11 或更高版本；
+- Android Platform Tools，命令行可以执行 `adb`；
+- 已登录目标账号的 Android 手机；
+- 手机已开启“USB 调试”和“USB 调试（安全设置）”；
+- Windows 与 9090 服务器已加入同一 Tailscale 网络。
+
+### 2. 安装项目
 
 ```powershell
-cd D:\AI\job\XianyuMessageAutomation
+git clone https://github.com/kilbertert/XianyuMessageAutomation.git
+cd XianyuMessageAutomation
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 Copy-Item config.example.json config.json
 ```
 
-## 使用
+修改私有的 `config.json`：
 
-检查设备：
+- `serial`：`adb devices` 显示的手机序列号；
+- `gateway.base_url`：9090 后台的 Tailscale 地址；
+- `gateway.account_id`：后台“账号管理”中的 Cookie ID；
+- 坐标：首次可使用示例值，设备或闲鱼版本不同必须重新校准。
+
+`config.json`、运行状态和聊天数据都被 Git 忽略。
+
+### 3. 完成一次有人值守的输入法安装
+
+网关使用 uiautomator2 的 `AdbKeyboard` 向 Flutter 输入框精确提交文本。第一次执行下列
+命令时，手机可能弹出 APK 安装确认，必须在手机上同意：
+
+```powershell
+.\.venv\Scripts\python.exe -c "import uiautomator2 as u2; u2.connect('你的设备序列号').set_input_ime(True)"
+```
+
+安装完成后可以切回日常输入法；网关发送时会临时切换，并在输入后恢复原输入法。完整说明见
+[设备准备与坐标校准](docs/device-calibration.md)。
+
+### 4. 执行自检
 
 ```powershell
 .\.venv\Scripts\xianyu-msg.exe --config config.json doctor
+Invoke-RestMethod http://你的服务器Tailscale地址:9090/api/android-gateway/v1/health
 ```
 
-读取未读数：
+期望：
+
+- `doctor` 返回 `"ok": true`、正确的闲鱼版本和 `input_injection: true`；
+- 健康接口返回 `ok: true`、`enabled: true`。
+
+### 5. 安装常驻网关
+
+使用与 ADB 会话相同的 Windows 用户运行：
 
 ```powershell
-.\.venv\Scripts\xianyu-msg.exe --config config.json unread
+$secret = Read-Host "Android gateway shared secret" -AsSecureString
+.\scripts\install_gateway_service.ps1 -SharedSecret $secret
 ```
 
-持续识别新的闲鱼通知：
+安装器会创建当前用户登录后运行的计划任务 `XianyuAndroidMessageGateway`，并使用 Windows
+DPAPI 保存共享密钥。不要同时手工运行第二个 `gateway` 进程。
 
 ```powershell
-.\.venv\Scripts\xianyu-msg.exe --config config.json monitor `
-  --interval 0.5
+Get-ScheduledTask -TaskName XianyuAndroidMessageGateway
+Get-Content .\var\service\gateway.log -Tail 50
 ```
 
-监控启动时会把已有通知作为基线，只输出之后出现或更新的通知。调试当前活动通知时，
-可使用 `monitor --once --include-existing`。默认仅输出交易聊天消息；排查其他闲鱼通知时
-显式增加 `--all-notifications`。监控只识别和记录事件，不会打开聊天或发送回复。
+生产运行细节见 [Windows 常驻服务](docs/windows-service.md)。
 
-持续把新消息正文写入待处理队列：
+## 运行前必须知道
+
+- 手机必须通过 ADB 保持 `device` 状态，并在需要操作 UI 时保持解锁；
+- 闲鱼应停留在后台，手机回到桌面。闲鱼位于前台时系统可能不产生聊天通知；
+- 目标账号必须已在 9090 后台导入有效 Cookie；
+- `ANDROID_GATEWAY_ACCOUNT_IDS` 必须包含同一个 Cookie ID；
+- 同一台手机、同一账号只能运行一个网关实例；
+- `sent` 表示发送气泡已在闲鱼 UI 中确认，不等同于对方已经阅读；
+- `send_unconfirmed` 表示发送按钮最多已经点击一次但 UI 无法确认，系统不会自动重发，
+  必须人工检查聊天页。
+
+## 命令定位
+
+| 命令 | 用途 | 是否发送消息 |
+|---|---|---:|
+| `doctor` | 检查 ADB、设备、输入权限和闲鱼版本 | 否 |
+| `unread` | 读取消息页未读数 | 否 |
+| `screenshot-list` | 保存消息列表截图用于坐标校准 | 否 |
+| `monitor` | 只监控闲鱼通知并输出 JSONL | 否 |
+| `inbox` | 打开通知、提取正文并写入本地待处理队列 | 否 |
+| `queue claim/ack/fail` | 消费本地队列 | 否 |
+| `reply` | 对指定可见会话做 dry-run 或单次发送 | 仅 `--apply` |
+| `gateway` | 生产主路径：后台决策后在当前聊天回复 | 是 |
+
+所有参数以 CLI 为准：
 
 ```powershell
-.\.venv\Scripts\xianyu-msg.exe --config config.json inbox `
-  --interval 0.5
+.\.venv\Scripts\xianyu-msg.exe --help
+.\.venv\Scripts\xianyu-msg.exe gateway --help
 ```
 
-`inbox` 会以现有通知建立基线。之后出现聊天通知时，它要求发送者标题唯一，打开对应
-聊天、提取最新左侧入站气泡、写入 `var/inbound-pending.jsonl`，再返回桌面。整个流程
-不输入文字、不点击发送；打开聊天会把会话标记为已读。
+## 项目结构
 
-把 Android 作为消息收发网关，并由服务端仓库决定回复：
-
-```powershell
-$env:ANDROID_GATEWAY_SHARED_SECRET = "与服务器相同的长随机密钥"
-.\.venv\Scripts\xianyu-msg.exe --config config.json gateway `
-  --interval 0.5
+```text
+XianyuMessageAutomation/
+├─ src/xianyu_automation/   Python 包：通知、设备、工作流和持久化
+├─ scripts/                 Windows 常驻任务安装、监督和卸载脚本
+├─ tests/                   不依赖真机的单元与回归测试
+├─ docs/                    使用、运维、协议、排障和验收文档
+├─ config.example.json      可提交的配置模板
+├─ config.json              私有运行配置，不提交
+├─ var/                     私有状态、日志和截图，不提交
+├─ DESIGN.md                总体架构方案
+└─ pyproject.toml           Python 包和 CLI 入口
 ```
 
-先在 `config.json` 中增加 `config.example.json` 所示的 `gateway` 段，并把
-`account_id` 换成服务端管理后台中的 Cookie ID。当前部署使用 Tailscale 地址
-`http://100.96.121.55:9090`；客户端拒绝向普通公网 HTTP 地址发送聊天正文。
+## 状态与隐私
 
-`gateway` 会在打开通知前检查服务端健康状态，打开后把正文作为幂等事件交给服务端。
-服务端主动拉取最近会话并唯一关联真实买家/商品，再复用原有商品、关键词、默认和 AI
-回复规则。文本决策在仍打开的当前聊天中只点击一次发送，随后回传结果。
+`var/` 中可能存在聊天正文和通知标题，只允许当前运行用户访问，不应提交或复制到公开位置。
+主要文件如下：
 
-如果程序在服务端请求阶段失败，聊天页会保持打开且本地保留未完成阶段。由进程管理器
-重启相同命令时会自动恢复；也可显式运行：
-
-```powershell
-.\.venv\Scripts\xianyu-msg.exe --config config.json gateway --resume-current
-```
-
-如果崩溃点位于发送点击边界，恢复结果为 `send_unconfirmed`，不会自动再次点击。
-
-消费最早一条待处理消息，并获得 5 分钟租约：
-
-```powershell
-.\.venv\Scripts\xianyu-msg.exe --config config.json queue claim `
-  --worker-id reply-policy-1 `
-  --lease-seconds 300
-```
-
-处理成功后必须由同一个 worker 显式确认：
-
-```powershell
-.\.venv\Scripts\xianyu-msg.exe --config config.json queue ack `
-  --worker-id reply-policy-1 `
-  --fingerprint MESSAGE_SHA256
-```
-
-处理失败时释放重试；达到最大次数后进入死信：
-
-```powershell
-.\.venv\Scripts\xianyu-msg.exe --config config.json queue fail `
-  --worker-id reply-policy-1 `
-  --fingerprint MESSAGE_SHA256 `
-  --reason "downstream unavailable" `
-  --max-attempts 3
-```
-
-未确认的租约到期后会重新投递，因此下游处理必须保持幂等。消费状态只保存指纹、租约、
-次数和失败原因哈希；正文仍只存在于 Git 忽略的 `var/inbound-pending.jsonl`。
-
-保存消息列表截图，用于读取目标会话行中心的 Y 坐标：
-
-```powershell
-.\.venv\Scripts\xianyu-msg.exe --config config.json screenshot-list `
-  --output var\message-list.png
-```
-
-先进行 dry-run：
-
-```powershell
-.\.venv\Scripts\xianyu-msg.exe --config config.json reply `
-  --marker AUTO_E2E_001 `
-  --reply "收到，这是自动化联调测试。" `
-  --conversation-y 925
-```
-
-只有返回 `dry_run_ready` 后才执行真实发送：
-
-```powershell
-.\.venv\Scripts\xianyu-msg.exe --config config.json reply `
-  --marker AUTO_E2E_001 `
-  --reply "收到，这是自动化联调测试。" `
-  --conversation-y 925 `
-  --apply
-```
-
-如果已经人工打开目标聊天，可用 `--current-chat` 替代 `--conversation-y`。
-
-## 状态
-
-`var/state.json` 只保存 marker/会话提示的 SHA-256 指纹、发送时间和回复哈希，不保存聊天正文。
-通知去重状态同样只保存哈希；`var/inbound-notifications.jsonl` 会保存通知标题和正文，
-仅用于本机消息路由，整个 `var/` 目录不会提交到 Git。
-`var/inbound-pending.jsonl` 保存已提取的待处理消息正文；对应状态文件只保存哈希。
-`var/inbound-consumer-state.json` 保存领取、完成和死信生命周期，不复制发送者或正文。
-`var/gateway-state.json` 只在事件未完成期间保存恢复所需正文；完成后只保留事件指纹、
-结果、时间和回复哈希。
-
-重要状态：
-
-- `dry_run_ready`：目标唯一且没有回复，可以人工决定是否发送；
-- `sent`：只点击一次发送，并在页面确认到唯一回复气泡；
-- `skipped_duplicate`：页面或状态文件表明已经处理；
-- `target_missing` / `target_not_unique`：拒绝发送；
-- `send_unconfirmed`：已点击一次但页面未确认，立即停止，不自动重试。
+| 文件 | 作用 | 是否可能含正文 |
+|---|---|---:|
+| `var/gateway-state.json` | 网关崩溃恢复和已完成事件摘要 | 未完成时是 |
+| `var/gateway-notification-state.json` | 已确认通知指纹 | 否 |
+| `var/inbound-notifications.jsonl` | `monitor` 通知事件流 | 是 |
+| `var/inbound-pending.jsonl` | `inbox` 本地待处理队列 | 是 |
+| `var/inbound-consumer-state.json` | 队列租约、重试和死信状态 | 否 |
+| `var/service/gateway.log` | 常驻服务日志 | 可能 |
+| `var/artifacts/` | 显式保留的校准或验收截图 | 是 |
 
 ## 测试
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
-架构与设备校准说明见：
+自动测试覆盖通知解析与去重、路由、队列租约、HMAC 客户端、崩溃恢复、单次发送边界、
+AdbKeyboard 输入、聊天重开确认和 Windows 服务脚本。真实设备结论见
+[验收记录](docs/validation.md)。
 
-- [Architecture](docs/architecture.md)
-- [Device calibration](docs/device-calibration.md)
-- [Inbound detection](docs/inbound-detection.md)
-- [Server gateway integration](docs/server-gateway.md)
-- [Windows persistent gateway](docs/windows-service.md)
-- [Validation record](docs/validation.md)
+## 文档导航
 
-## 合规与隐私
+| 文档 | 适合什么时候看 |
+|---|---|
+| [从零开始](docs/getting-started.md) | 第一次部署和第一次真实消息验收 |
+| [配置说明](docs/configuration.md) | 修改设备、坐标、通知或后台地址 |
+| [日常运维](docs/operations.md) | 启停、日志、升级、备份和故障值守 |
+| [总体架构方案](DESIGN.md) | 快速理解系统边界和关键设计决策 |
+| [详细架构](docs/architecture.md) | 理解模块、状态机、数据与失败恢复 |
+| [9090 后台对接](docs/server-gateway.md) | 配置另一个仓库和检查 API/回执 |
+| [Windows 常驻服务](docs/windows-service.md) | 安装、检查、重启和卸载计划任务 |
+| [入站检测与本地队列](docs/inbound-detection.md) | 使用 `monitor`、`inbox` 和 `queue` |
+| [设备准备与坐标校准](docs/device-calibration.md) | 更换手机、输入法或闲鱼版本 |
+| [故障排查](docs/troubleshooting.md) | 按现象快速定位问题 |
+| [验收手册与记录](docs/validation.md) | 发布前回归或核对已验证能力 |
 
-本项目只面向自有账号的授权工作流。请遵守闲鱼服务协议，不用于群发、骚扰、
-欺诈、抓取他人隐私或规避平台限制。聊天截图可能包含个人信息，默认不保留；
-只有显式传入 `--keep-artifacts` 才会写入 `var/artifacts/`，该目录不会提交到 Git。
+## 合规边界
+
+本项目仅用于自有账号的授权工作流，不用于群发、骚扰、欺诈、规避平台限制或收集他人
+隐私。请遵守闲鱼服务协议，并对聊天内容、Cookie、共享密钥、日志和截图采取最小权限保护。

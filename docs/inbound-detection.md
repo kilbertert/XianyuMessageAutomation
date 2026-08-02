@@ -1,54 +1,125 @@
-# Inbound detection
+# 入站检测与本地队列
 
-## Current path
+生产自动回复使用 `gateway`。本文件介绍两个辅助模式：
 
-The `monitor` command polls Android's notification service through ADB and parses only records
-whose package is `com.taobao.idlefish`. On the validated device, Xianyu 7.19.70 uses the channel
-ending in `107787` for `交易聊天消息`; that full channel ID is configured as an explicit message
-candidate allowlist.
+- `monitor`：只读通知事件流；
+- `inbox + queue`：把消息正文写入本地文件队列供其他本地进程消费。
 
-Every unseen notification snapshot produces one JSON object on stdout and one line in
-`var/inbound-notifications.jsonl`. A notification update is treated as a new event when its
-Android update timestamp or content changes.
+它们适合诊断或独立集成，不要与生产 `gateway` 同时监听同一设备的同一通知账本。
+
+## 1. 通知来源
+
+项目通过 ADB 轮询 Android 通知服务，只解析包名：
+
+```text
+com.taobao.idlefish
+```
+
+已验证闲鱼 7.19.70 的交易聊天频道：
+
+```text
+mipush|com.taobao.idlefish|107787
+```
+
+频道完整 ID 配置在 `notifications.message_channel_ids`。默认过滤物流、营销等非聊天通知。
+
+闲鱼通知通常只提供遮罩发送者标题和“发来一条新消息”，不提供真实正文。因此：
+
+- `monitor` 可以证明通知到达，但正文可能是通用文字；
+- `inbox` 和 `gateway` 必须点击通知进入准确聊天，才能读取最新气泡；
+- 点击通知会把会话标记为已读；
+- 闲鱼位于前台时可能不产生系统通知。
+
+## 2. monitor：只读通知
+
+持续运行：
 
 ```powershell
 .\.venv\Scripts\xianyu-msg.exe --config config.json monitor --interval 0.5
 ```
 
-The first snapshot is a baseline by default, so notifications that existed before startup are
-not replayed. Use the following diagnostic command to include them:
+限时运行：
 
 ```powershell
-.\.venv\Scripts\xianyu-msg.exe --config config.json monitor --once --include-existing
+.\.venv\Scripts\xianyu-msg.exe --config config.json monitor `
+  --duration 60 `
+  --interval 0.5
 ```
 
-Non-message Xianyu channels are filtered by default. Add `--all-notifications` only when
-diagnosing channel classification.
+读取一次并包含当前活动通知：
 
-## Routing and pending queue
+```powershell
+.\.venv\Scripts\xianyu-msg.exe --config config.json monitor `
+  --once `
+  --include-existing
+```
 
-The `inbox` command composes notification detection with controlled UI routing:
+诊断所有闲鱼频道：
+
+```powershell
+.\.venv\Scripts\xianyu-msg.exe --config config.json monitor `
+  --once `
+  --include-existing `
+  --all-notifications
+```
+
+`monitor` 不打开聊天、不输入文字、不点击发送。
+
+### 输出
+
+每个事件输出一行 JSON，包含：
+
+- `fingerprint` 和 `source_key_sha256`；
+- 包名、频道、类别、Android 更新时间；
+- 本地观察时间；
+- 标题、文本和展开文本；
+- `message_candidate`。
+
+同时追加到 `var/inbound-notifications.jsonl`。状态文件只保存哈希，但 JSONL 可能含发送者标题
+和通知文字。
+
+## 3. 首次基线
+
+默认第一次快照把现有通知记为基线，不输出它们。这样启动监控不会把旧通知误认为新消息。
+
+`--include-existing` 只适合受控诊断或明确的恢复流程。生产监督器会在通知状态已初始化后自动
+使用它，保证重启时尚未确认的活动通知不丢失。
+
+## 4. inbox：打开聊天并入队
 
 ```powershell
 .\.venv\Scripts\xianyu-msg.exe --config config.json inbox --interval 0.5
 ```
 
-For every new message candidate it:
+每条新通知的流程：
 
-1. requires exactly one notification title match;
-2. opens the notification and requires Xianyu's chat activity;
-3. extracts the latest visible left-anchored chat message;
-4. appends one idempotent record to `var/inbound-pending.jsonl`;
-5. records hash-only queue and notification state;
-6. presses Home and verifies the focused window through Android `dumpsys window`.
+1. 标题必须精确匹配一个通知；
+2. 点击后必须进入闲鱼聊天 Activity；
+3. 从屏幕高度 20% 到 90% 的消息区域解析文本节点；
+4. 按横向位置只保留左侧入站气泡；
+5. 取最新可见正文；
+6. 追加一个幂等记录到 `var/inbound-pending.jsonl`；
+7. 成功入队后才确认通知；
+8. 按 Home，并确认闲鱼不再是前台。
 
-Notification acknowledgement happens only after successful queueing. A routing or extraction
-failure therefore remains eligible for a later retry. The workflow never enters text or clicks
-Send.
+`inbox` 绝不触碰输入框或发送按钮。打开聊天仍会导致闲鱼将会话标记为已读。
 
-## Pending queue consumption
+### 队列记录
 
-Claim the oldest available message with a stable worker identifier:
+记录包含：
+
+- 消息指纹；
+- 通知指纹；
+- 遮罩发送者标题；
+- 正文；
+- 通知观察时间；
+- 入队时间。
+
+`var/inbound-pending.jsonl` 含正文，必须作为私有数据。入队去重状态只保存哈希。
+
+## 5. queue：租约消费
+
+领取最早可用消息：
 
 ```powershell
 .\.venv\Scripts\xianyu-msg.exe --config config.json queue claim `
@@ -56,8 +127,7 @@ Claim the oldest available message with a stable worker identifier:
   --lease-seconds 300
 ```
 
-The claim output includes the complete message record, attempt number, owner, and lease deadline.
-After the downstream operation succeeds, acknowledge the fingerprint with the same owner:
+成功处理后，由同一个 worker 确认：
 
 ```powershell
 .\.venv\Scripts\xianyu-msg.exe --config config.json queue ack `
@@ -65,7 +135,7 @@ After the downstream operation succeeds, acknowledge the fingerprint with the sa
   --fingerprint MESSAGE_SHA256
 ```
 
-On a failed downstream operation, release it for another attempt:
+处理失败时释放重试：
 
 ```powershell
 .\.venv\Scripts\xianyu-msg.exe --config config.json queue fail `
@@ -75,37 +145,34 @@ On a failed downstream operation, release it for another attempt:
   --max-attempts 3
 ```
 
-Only the current lease owner may acknowledge or fail a message. Unacknowledged leases expire and
-are redelivered with an incremented attempt count. A failure at the attempt limit changes the
-record to `dead`; it will no longer be claimed automatically. The failure reason is emitted to
-the command only as SHA-256 and is not stored as plaintext.
+语义：
 
-## Output
+- 只有租约所有者可以 ack/fail；
+- 租约过期后消息会再次投递，attempt 增加；
+- 失败低于上限时回到 pending；
+- 达到上限后进入 dead，不再自动领取；
+- 状态转换使用本地 OS 文件锁；
+- 失败原因只保存哈希；
+- 消费者必须幂等，因为这是至少一次交付。
 
-Each event contains:
+## 6. 为什么生产回复不用本地队列
 
-- SHA-256 fingerprints instead of the Android notification source key;
-- package, channel, category, and Android update time;
-- locally observed time;
-- title, text, and expanded text when exposed by Android;
-- `message_candidate`, based on the configured chat channel or standard message metadata.
+离开聊天后，当前闲鱼 UI 没有稳定的真实会话 ID 可供稍后重新打开准确聊天。如果把业务
+决策异步延迟到本地队列消费之后，发送阶段可能无法证明目标会话。
 
-The state file contains hashes only. The JSONL event log contains notification text and must be
-treated as private local data; `var/` is ignored by Git.
+生产 `gateway` 因此在通知已经打开准确聊天时同步请求 9090 决策，并保持该聊天直到发送或
+无需回复结算。文件队列继续保留给只收消息的集成。
 
-## Limits
+## 7. 限制
 
-- ADB must stay connected.
-- Android and Xianyu notification permission must remain enabled.
-- Polling can miss a notification that is posted and removed entirely between polls.
-- Xianyu may aggregate several messages into one updated notification.
-- Xianyu exposes a generic `发来一条新消息` notification instead of the message body.
-- Opening the notification can resolve the exact chat, but marks that conversation as read.
-- Notification detection never triggers a reply.
-- The current extractor queues the latest visible incoming bubble per notification. If Xianyu
-  aggregates a burst that exceeds the visible chat viewport, intermediate messages may be missed.
-- Masked sender titles must be unique in the notification shade; ambiguous titles fail closed.
+- ADB 必须持续连接；
+- 通知权限和聊天频道必须开启；
+- 两次轮询之间发布又移除的通知可能错过；
+- 闲鱼可能把多条消息聚合成一个通知更新；
+- 当前每个通知只提取最新可见左侧气泡；
+- 超出当前屏幕的中间突发消息可能遗漏；
+- 遮罩标题相同导致歧义时失败关闭；
+- 当前不是跨主机分布式消息队列。
 
-The durable production replacement is a small Android companion app based on
-`NotificationListenerService`. Android requires the user to grant notification-listener access;
-the service then receives notification posted and removed callbacks directly.
+若要完全摆脱 ADB 通知轮询，需要开发并由用户授权一个 Android
+`NotificationListenerService` 辅助应用。当前仓库尚未实现该组件。
