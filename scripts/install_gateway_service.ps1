@@ -25,30 +25,48 @@ foreach ($requiredPath in @($serviceScript, $gatewayCli, $configPath)) {
 
 [IO.Directory]::CreateDirectory($serviceDirectory) | Out-Null
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$acl = Get-Acl -LiteralPath $serviceDirectory
-$acl.SetAccessRuleProtection($true, $false)
-foreach ($existingRule in @($acl.Access)) {
-    [void]$acl.RemoveAccessRuleSpecific($existingRule)
-}
+$currentAcl = Get-Acl -LiteralPath $serviceDirectory
+$currentRules = @($currentAcl.Access)
+$expectedIdentities = @($identity, "NT AUTHORITY\SYSTEM")
+$currentIdentities = @(
+    $currentRules |
+        ForEach-Object { $_.IdentityReference.Value } |
+        Sort-Object -Unique
+)
+$aclAlreadyRestricted = (
+    $currentAcl.AreAccessRulesProtected -and
+    $currentRules.Count -eq 2 -and
+    $currentIdentities.Count -eq 2 -and
+    @($expectedIdentities | Where-Object { $_ -notin $currentIdentities }).Count -eq 0 -and
+    @($currentRules | Where-Object {
+        $_.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+        ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -ne
+            [Security.AccessControl.FileSystemRights]::FullControl
+    }).Count -eq 0
+)
 $inheritanceFlags = (
     [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
     [Security.AccessControl.InheritanceFlags]::ObjectInherit
 )
-$acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
-    $identity,
-    [Security.AccessControl.FileSystemRights]::FullControl,
-    $inheritanceFlags,
-    [Security.AccessControl.PropagationFlags]::None,
-    [Security.AccessControl.AccessControlType]::Allow
-)))
-$acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
-    "NT AUTHORITY\SYSTEM",
-    [Security.AccessControl.FileSystemRights]::FullControl,
-    $inheritanceFlags,
-    [Security.AccessControl.PropagationFlags]::None,
-    [Security.AccessControl.AccessControlType]::Allow
-)))
-Set-Acl -LiteralPath $serviceDirectory -AclObject $acl
+if (-not $aclAlreadyRestricted) {
+    $acl = New-Object Security.AccessControl.DirectorySecurity
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
+        $identity,
+        [Security.AccessControl.FileSystemRights]::FullControl,
+        $inheritanceFlags,
+        [Security.AccessControl.PropagationFlags]::None,
+        [Security.AccessControl.AccessControlType]::Allow
+    )))
+    $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
+        "NT AUTHORITY\SYSTEM",
+        [Security.AccessControl.FileSystemRights]::FullControl,
+        $inheritanceFlags,
+        [Security.AccessControl.PropagationFlags]::None,
+        [Security.AccessControl.AccessControlType]::Allow
+    )))
+    Set-Acl -LiteralPath $serviceDirectory -AclObject $acl
+}
 
 $SharedSecret | ConvertFrom-SecureString | Set-Content -LiteralPath $secretPath -Encoding ASCII
 
