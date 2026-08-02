@@ -23,6 +23,8 @@ def test_service_runs_in_interactive_user_session_and_restarts() -> None:
     assert "New-ScheduledTaskTrigger -AtLogOn" in source
     assert "-LogonType Interactive" in source
     assert "-RestartCount 999" in source
+    assert "-AllowStartIfOnBatteries" in source
+    assert "-DontStopIfGoingOnBatteries" in source
     assert "$inheritanceFlags" in source
 
 

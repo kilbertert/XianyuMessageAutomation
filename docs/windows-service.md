@@ -19,6 +19,7 @@ The installer:
 - stores the shared secret with Windows DPAPI for the current user;
 - restricts `var\service` to the current user and `SYSTEM`;
 - registers `XianyuAndroidMessageGateway` at user logon;
+- remains active when the Windows host is running on battery power;
 - restarts the gateway after either an unexpected process exit or a task failure.
 
 The secret is decrypted only inside the supervisor process and inherited by the gateway child
