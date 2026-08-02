@@ -202,13 +202,18 @@ class Uiautomator2Device:
         if not title:
             raise DeviceStateError("notification title must not be empty")
         self._device.open_notification()
-        time.sleep(self.config.timings.page_seconds)
-
+        deadline = time.monotonic() + self.config.timings.page_seconds + 5
         selector = self._device(text=title)
-        count = int(selector.count)
-        if count == 0:
-            selector = self._device(description=title)
+        count = 0
+        while time.monotonic() < deadline:
+            selector = self._device(text=title)
             count = int(selector.count)
+            if count == 0:
+                selector = self._device(description=title)
+                count = int(selector.count)
+            if count != 0:
+                break
+            time.sleep(self.config.timings.poll_seconds)
         if count != 1:
             self._device.press("back")
             raise DeviceStateError(

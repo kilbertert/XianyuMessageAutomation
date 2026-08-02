@@ -71,6 +71,25 @@ class FakeNotificationDevice:
         self.back_presses += 1
 
 
+class SequenceSelector(FakeSelector):
+    def __init__(self, counts: list[int]):
+        self.counts = counts
+        self.reads = 0
+        self.clicks = 0
+
+    @property
+    def count(self) -> int:
+        value = self.counts[min(self.reads, len(self.counts) - 1)]
+        self.reads += 1
+        return value
+
+
+class TransientNotificationDevice(FakeNotificationDevice):
+    def __init__(self) -> None:
+        super().__init__(title_count=0)
+        self.title = SequenceSelector([0, 1])
+
+
 def test_open_notification_refuses_non_unique_sender_title(monkeypatch) -> None:
     monkeypatch.setattr("xianyu_automation.device.time.sleep", lambda _: None)
     device = object.__new__(Uiautomator2Device)
@@ -87,6 +106,26 @@ def test_open_notification_refuses_non_unique_sender_title(monkeypatch) -> None:
     assert backing.notification_opens == 1
     assert backing.title.clicks == 0
     assert backing.back_presses == 1
+
+
+def test_open_notification_waits_for_transient_system_ui_title(monkeypatch) -> None:
+    monkeypatch.setattr("xianyu_automation.device.time.sleep", lambda _: None)
+    device = object.__new__(Uiautomator2Device)
+    backing = TransientNotificationDevice()
+    device._device = backing
+    device._current_activity = lambda: ".ChatActivity"
+    device.dump_hierarchy = lambda: "<hierarchy />"
+    device.config = SimpleNamespace(
+        app=SimpleNamespace(chat_activity=".ChatActivity"),
+        timings=SimpleNamespace(page_seconds=0, poll_seconds=0),
+    )
+
+    xml = device.open_notification("x***3")
+
+    assert xml == "<hierarchy />"
+    assert backing.notification_opens == 1
+    assert backing.title.clicks == 1
+    assert backing.back_presses == 0
 
 
 class FakeReplyDevice:
