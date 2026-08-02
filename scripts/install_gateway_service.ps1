@@ -25,8 +25,11 @@ foreach ($requiredPath in @($serviceScript, $gatewayCli, $configPath)) {
 
 [IO.Directory]::CreateDirectory($serviceDirectory) | Out-Null
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$acl = New-Object Security.AccessControl.DirectorySecurity
+$acl = Get-Acl -LiteralPath $serviceDirectory
 $acl.SetAccessRuleProtection($true, $false)
+foreach ($existingRule in @($acl.Access)) {
+    [void]$acl.RemoveAccessRuleSpecific($existingRule)
+}
 $inheritanceFlags = (
     [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
     [Security.AccessControl.InheritanceFlags]::ObjectInherit

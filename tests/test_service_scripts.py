@@ -26,6 +26,8 @@ def test_service_runs_in_interactive_user_session_and_restarts() -> None:
     assert "-AllowStartIfOnBatteries" in source
     assert "-DontStopIfGoingOnBatteries" in source
     assert "$inheritanceFlags" in source
+    assert "Get-Acl -LiteralPath $serviceDirectory" in source
+    assert "RemoveAccessRuleSpecific" in source
 
 
 def test_supervisor_uses_dpapi_secret_and_gateway_command() -> None:
