@@ -42,6 +42,8 @@ class GatewayDevicePort(Protocol):
 
     def send_once(self) -> None: ...
 
+    def reopen_chat(self, title: str) -> str: ...
+
     def return_home(self) -> None: ...
 
 
@@ -404,7 +406,11 @@ class GatewayWorkflow:
         self.store.set_phase(event_id, "sending")
         self.device.prepare_reply(reply)
         self.device.send_once()
-        confirmed = self._wait_for_increment(reply, before_count)
+        confirmed = self._wait_for_increment(
+            reply,
+            before_count,
+            str(event["sender_label"]),
+        )
         outcome = "sent" if confirmed else "send_unconfirmed"
         status = GatewayStatus.SENT if confirmed else GatewayStatus.SEND_UNCONFIRMED
         self.store.set_phase(event_id, outcome)
@@ -421,7 +427,12 @@ class GatewayWorkflow:
         if not candidates or candidates[-1].value != expected:
             raise DeviceStateError("current chat no longer ends with the routed message")
 
-    def _wait_for_increment(self, reply: str, before_count: int) -> bool:
+    def _wait_for_increment(
+        self,
+        reply: str,
+        before_count: int,
+        sender_title: str,
+    ) -> bool:
         deadline = time.monotonic() + self.config.timings.send_timeout_seconds
         while time.monotonic() < deadline:
             current = len(
@@ -434,7 +445,14 @@ class GatewayWorkflow:
             if current > before_count:
                 return True
             time.sleep(self.config.timings.poll_seconds)
-        return False
+        try:
+            refreshed = self.device.reopen_chat(sender_title)
+        except DeviceStateError:
+            return False
+        return (
+            len(find_text(refreshed, reply, case_sensitive=True))
+            > before_count
+        )
 
     def _settle(
         self,

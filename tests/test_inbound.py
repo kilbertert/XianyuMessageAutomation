@@ -22,6 +22,8 @@ CHAT_XML = """<hierarchy>
         clickable="true" bounds="[263,882][901,992]" />
   <node text="" content-desc="auto_e2e_002" class="android.view.View"
         clickable="true" bounds="[179,1201][531,1311]" />
+  <node text="" content-desc="auto_e2e_fastime_001" class="android.view.View"
+        clickable="true" bounds="[179,1979][693,2089]" />
   <node text="" content-desc="请输入消息" class="android.widget.EditText"
         clickable="true" bounds="[100,2110][850,2240]" />
 </hierarchy>"""
@@ -33,6 +35,7 @@ def test_incoming_chat_messages_excludes_outgoing_and_controls() -> None:
     assert [message.value for message in messages] == [
         "auto_e2e_001",
         "auto_e2e_002",
+        "auto_e2e_fastime_001",
     ]
 
 
@@ -79,7 +82,7 @@ def test_inbound_workflow_routes_latest_message_to_queue_and_returns_home(tmp_pa
     result = workflow.process(_notification())
 
     assert result.status == "queued"
-    assert result.body == "auto_e2e_002"
+    assert result.body == "auto_e2e_fastime_001"
     assert result.sent_clicks == 0
     assert device.opened_titles == ["x***3"]
     assert device.home_count == 1
@@ -87,7 +90,7 @@ def test_inbound_workflow_routes_latest_message_to_queue_and_returns_home(tmp_pa
         json.loads(line)
         for line in queue_file.read_text(encoding="utf-8").splitlines()
     ]
-    assert [row["body"] for row in rows] == ["auto_e2e_002"]
+    assert [row["body"] for row in rows] == ["auto_e2e_fastime_001"]
 
 
 def test_inbound_workflow_deduplicates_queue_without_plaintext_state(tmp_path) -> None:
@@ -103,7 +106,7 @@ def test_inbound_workflow_deduplicates_queue_without_plaintext_state(tmp_path) -
     assert second.status == "skipped_duplicate"
     assert len(queue_file.read_text(encoding="utf-8").splitlines()) == 1
     state_raw = state_file.read_text(encoding="utf-8")
-    assert "auto_e2e_002" not in state_raw
+    assert "auto_e2e_fastime_001" not in state_raw
     assert "x***3" not in state_raw
     assert device.home_count == 2
 

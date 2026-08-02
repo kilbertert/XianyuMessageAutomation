@@ -169,6 +169,35 @@ class Uiautomator2Device:
     def return_to_messages(self) -> str:
         return self.navigate_to_messages()
 
+    def reopen_chat(self, title: str) -> str:
+        if not title:
+            raise DeviceStateError("chat title must not be empty")
+        self.ensure_chat()
+        self._device.press("back")
+        time.sleep(self.config.timings.page_seconds)
+
+        selector = self._device(text=title)
+        count = int(selector.count)
+        if count == 0:
+            selector = self._device(description=title)
+            count = int(selector.count)
+        if count != 1:
+            raise DeviceStateError(
+                f"chat title is not unique after send: {title!r} matched {count}"
+            )
+
+        selector.click()
+        deadline = time.monotonic() + self.config.timings.page_seconds + 5
+        while time.monotonic() < deadline:
+            if self._current_activity() == self.config.app.chat_activity:
+                time.sleep(1)
+                return self.dump_hierarchy()
+            time.sleep(self.config.timings.poll_seconds)
+        raise DeviceStateError(
+            "chat did not reopen after send; "
+            f"current activity is {self._current_activity()}"
+        )
+
     def open_notification(self, title: str) -> str:
         if not title:
             raise DeviceStateError("notification title must not be empty")

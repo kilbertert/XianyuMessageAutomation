@@ -33,7 +33,7 @@ def incoming_chat_messages(xml: str, *, width: int, height: int) -> list[TextNod
             or not node.clickable
         ):
             continue
-        if bounds.top < height * 0.2 or bounds.bottom > height * 0.85:
+        if bounds.top < height * 0.2 or bounds.bottom > height * 0.9:
             continue
         if bounds.left > width * 0.25 or bounds.right >= width * 0.8:
             continue

@@ -111,6 +111,7 @@ class FakeDevice:
         self.sent_clicks = 0
         self.home_count = 0
         self.chat_checks = 0
+        self.reopened_titles = []
 
     def open_notification(self, title: str) -> str:
         assert title == "买家甲"
@@ -135,6 +136,10 @@ class FakeDevice:
             '<node text="" content-desc="在的" class="android.view.View" '
             'clickable="true" bounds="[600,1400][950,1500]" /></hierarchy>',
         )
+
+    def reopen_chat(self, title: str) -> str:
+        self.reopened_titles.append(title)
+        return self.chat_xml
 
     def return_home(self) -> None:
         self.home_count += 1
@@ -186,6 +191,44 @@ def test_gateway_sends_server_decision_once_and_receipts_success(tmp_path) -> No
     assert device.home_count == 1
     assert client.receipts == [(result.event_id, "sent")]
     assert store.pending() is None
+
+
+class StaleConfirmationDevice(FakeDevice):
+    def __init__(self) -> None:
+        super().__init__()
+        self.refreshed_xml = self.chat_xml
+
+    def send_once(self) -> None:
+        self.sent_clicks += 1
+        self.refreshed_xml = self.chat_xml.replace(
+            "</hierarchy>",
+            '<node text="" content-desc="在的" class="android.view.View" '
+            'clickable="true" bounds="[600,1400][950,1500]" /></hierarchy>',
+        )
+
+    def reopen_chat(self, title: str) -> str:
+        self.reopened_titles.append(title)
+        self.chat_xml = self.refreshed_xml
+        return self.chat_xml
+
+
+def test_gateway_reopens_chat_to_confirm_stale_flutter_tree(tmp_path) -> None:
+    config = _config(tmp_path)
+    device = StaleConfirmationDevice()
+    client = FakeClient()
+    workflow = GatewayWorkflow(
+        config,
+        device,
+        client,
+        GatewayDeliveryStore(config.gateway.state_file),
+    )
+
+    result = workflow.process(_notification())
+
+    assert result.status == GatewayStatus.SENT
+    assert device.sent_clicks == 1
+    assert device.reopened_titles == ["买家甲"]
+    assert client.receipts == [(result.event_id, "sent")]
 
 
 def test_gateway_noop_never_touches_input_and_receipts_skip(tmp_path) -> None:
