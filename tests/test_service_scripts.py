@@ -35,7 +35,9 @@ def test_supervisor_uses_dpapi_secret_and_gateway_command() -> None:
 
     assert "ConvertTo-SecureString" in source
     assert "ZeroFreeBSTR" in source
-    assert "gateway --interval 0.5" in source
+    assert '"gateway", "--interval", "0.5"' in source
+    assert 'Test-Path -LiteralPath $resolvedNotificationState' in source
+    assert '$gatewayArguments += "--include-existing"' in source
     assert "while ($true)" in source
 
 

@@ -25,6 +25,10 @@ The installer:
 The secret is decrypted only inside the supervisor process and inherited by the gateway child
 process as `ANDROID_GATEWAY_SHARED_SECRET`. It is never placed in the Scheduled Task command line.
 
+The first start records already-present notifications as its baseline. Once the notification
+state file exists, supervisor restarts use `--include-existing` so an unseen notification that
+failed before acknowledgement is retried instead of dropped.
+
 ## Inspect
 
 ```powershell

@@ -35,6 +35,17 @@ foreach ($requiredPath in @($resolvedConfig, $resolvedSecret, $gatewayCli)) {
     }
 }
 
+$gatewayConfig = Get-Content -LiteralPath $resolvedConfig -Raw | ConvertFrom-Json
+$notificationStateValue = [string]$gatewayConfig.gateway.notification_state_file
+if ([string]::IsNullOrWhiteSpace($notificationStateValue)) {
+    throw "gateway.notification_state_file is missing from the configuration"
+}
+$resolvedNotificationState = if ([IO.Path]::IsPathRooted($notificationStateValue)) {
+    $notificationStateValue
+} else {
+    Join-Path (Split-Path -Parent $resolvedConfig) $notificationStateValue
+}
+
 $logDirectory = Split-Path -Parent $resolvedLog
 [IO.Directory]::CreateDirectory($logDirectory) | Out-Null
 
@@ -79,7 +90,14 @@ try {
         Write-GatewayServiceEvent -EventName "gateway_starting"
         $exitCode = -1
         try {
-            & $gatewayCli --config $resolvedConfig gateway --interval 0.5 *>> $resolvedLog
+            $gatewayArguments = @(
+                "--config", $resolvedConfig,
+                "gateway", "--interval", "0.5"
+            )
+            if (Test-Path -LiteralPath $resolvedNotificationState -PathType Leaf) {
+                $gatewayArguments += "--include-existing"
+            }
+            & $gatewayCli @gatewayArguments *>> $resolvedLog
             $exitCode = $LASTEXITCODE
         } catch {
             Write-GatewayServiceEvent -EventName "gateway_exception" -Data @{
