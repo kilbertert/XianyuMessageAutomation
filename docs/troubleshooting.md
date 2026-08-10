@@ -200,11 +200,12 @@ Get-Content .\var\service\gateway.log -Tail 100
 
 ## 后台没有命中商品或买家专属规则
 
-这是当前信息边界，不一定是故障。Android UI 不稳定暴露真实买家 ID、商品 ID 或 WebSocket
-会话 ID，后台使用 `android:<hash>` 合成会话，并将 `item_id` 留空。
+先检查事件的 `correlation_status` 和 `decision.reason`。网关只信任 Activity Intent 中同时
+出现的显式会话 ID 与买家 ID；否则后台只用五分钟内、正文一致且唯一的本地真实聊天记录。
+没有唯一身份时返回 `identity_not_correlated` 或 `identity_ambiguous` 并跳过回复。
 
-通用关键词、默认回复和 AI 仍可使用；依赖精确商品或真实买家的规则不会猜测匹配。需要这些
-字段时必须设计新的可靠关联来源。
+系统不再从遮罩昵称合成 `android:<hash>` 身份。真实 `item_id` 未提供时，依赖商品 ID 的规则
+不会命中；这是失败关闭，不应通过降低关联条件绕过。
 
 ## 同一消息出现两条回复
 

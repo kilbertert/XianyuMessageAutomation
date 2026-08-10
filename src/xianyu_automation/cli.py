@@ -10,7 +10,13 @@ from .consumer import QueueConsumer
 from .device import Uiautomator2Device
 from .doctor import AdbDoctor
 from .errors import AutomationError
-from .gateway import GatewayClient, GatewayDeliveryStore, GatewayWorkflow
+from .gateway import (
+    GatewayClient,
+    GatewayDeliveryStore,
+    GatewayInstanceLock,
+    GatewayWorkflow,
+    is_process_running,
+)
 from .inbound import InboundPoller, InboundQueue, InboundWorkflow
 from .models import GatewayStatus, ReplyRequest, ReplyStatus
 from .monitor import JsonlEventSink, NotificationMonitor, NotificationStateStore
@@ -94,6 +100,7 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="resume the durable in-flight event in the already open chat",
     )
+    gateway.add_argument("--supervisor-pid", type=int, help=argparse.SUPPRESS)
 
     queue = subcommands.add_parser(
         "queue",
@@ -158,6 +165,7 @@ def _configure_stdout() -> None:
 def main(argv: list[str] | None = None) -> int:
     _configure_stdout()
     args = _parser().parse_args(argv)
+    gateway_lock = None
     try:
         config = load_config(args.config)
         if args.command == "doctor":
@@ -280,6 +288,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "gateway":
             if config.gateway is None:
                 raise ValueError("gateway configuration is missing")
+            gateway_lock = GatewayInstanceLock.for_state_file(
+                config.gateway.state_file
+            )
+            gateway_lock.acquire()
+            if args.supervisor_pid is not None and not is_process_running(
+                args.supervisor_pid
+            ):
+                raise AutomationError("gateway supervisor process is not running")
             interval = args.interval or config.notifications.poll_seconds
             if interval <= 0:
                 raise ValueError("gateway interval must be positive")
@@ -348,6 +364,11 @@ def main(argv: list[str] | None = None) -> int:
                         interval_seconds=interval,
                         duration_seconds=args.duration,
                         include_existing=args.include_existing,
+                        while_running=(
+                            (lambda: is_process_running(args.supervisor_pid))
+                            if args.supervisor_pid is not None
+                            else None
+                        ),
                     )
                     for result in stream:
                         print(
@@ -443,6 +464,9 @@ def main(argv: list[str] | None = None) -> int:
     except (AutomationError, OSError, ValueError) as exc:
         _print({"ok": False, "error": str(exc)})
         return 2
+    finally:
+        if gateway_lock is not None:
+            gateway_lock.release()
 
 
 if __name__ == "__main__":

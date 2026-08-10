@@ -12,8 +12,14 @@ from xianyu_automation.config import (
     NotificationSettings,
     TimingSettings,
 )
+from xianyu_automation.cli import main
 from xianyu_automation.errors import AutomationError
-from xianyu_automation.gateway import GatewayClient, GatewayDeliveryStore, GatewayWorkflow
+from xianyu_automation.gateway import (
+    GatewayClient,
+    GatewayDeliveryStore,
+    GatewayInstanceLock,
+    GatewayWorkflow,
+)
 from xianyu_automation.models import GatewayStatus, NotificationEvent
 
 
@@ -84,6 +90,52 @@ def _notification() -> NotificationEvent:
     )
 
 
+def test_gateway_allows_only_one_process_for_the_same_state_file(tmp_path) -> None:
+    state_file = tmp_path / "gateway-state.json"
+
+    with GatewayInstanceLock.for_state_file(state_file):
+        with pytest.raises(AutomationError, match="already running"):
+            with GatewayInstanceLock.for_state_file(state_file):
+                pass
+
+    with GatewayInstanceLock.for_state_file(state_file):
+        pass
+
+
+def test_gateway_command_fails_closed_when_an_instance_is_running(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    config = _config(tmp_path)
+    monkeypatch.setattr("xianyu_automation.cli.load_config", lambda _: config)
+
+    with GatewayInstanceLock.for_state_file(config.gateway.state_file):
+        exit_code = main(["--config", "unused.json", "gateway", "--once"])
+
+    assert exit_code == 2
+    assert "already running" in capsys.readouterr().out
+
+
+def test_gateway_command_stops_when_its_supervisor_is_gone(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    config = _config(tmp_path)
+    monkeypatch.setattr("xianyu_automation.cli.load_config", lambda _: config)
+
+    exit_code = main(
+        [
+            "--config",
+            "unused.json",
+            "gateway",
+            "--once",
+            "--supervisor-pid",
+            "4294967294",
+        ]
+    )
+
+    assert exit_code == 2
+    assert "supervisor process is not running" in capsys.readouterr().out
+
+
 def test_gateway_client_bypasses_environment_proxies(tmp_path, monkeypatch) -> None:
     handlers = []
 
@@ -119,6 +171,14 @@ class FakeDevice:
 
     def display_size(self) -> tuple[int, int]:
         return 1080, 2400
+
+    def chat_route_evidence(self) -> dict[str, str]:
+        return {
+            "chat_id": "chat-001",
+            "sender_id": "buyer-001",
+            "item_id": "item-001",
+            "source": "android_activity_intent",
+        }
 
     def ensure_chat(self) -> None:
         self.chat_checks += 1
@@ -190,6 +250,10 @@ def test_gateway_sends_server_decision_once_and_receipts_success(tmp_path) -> No
     assert device.sent_clicks == 1
     assert device.home_count == 1
     assert client.receipts == [(result.event_id, "sent")]
+    assert client.submitted[0]["chat_id"] == "chat-001"
+    assert client.submitted[0]["sender_id"] == "buyer-001"
+    assert client.submitted[0]["item_id"] == "item-001"
+    assert client.submitted[0]["correlation_source"] == "android_activity_intent"
     assert store.pending() is None
 
 

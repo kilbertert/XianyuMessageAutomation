@@ -12,6 +12,8 @@
 
 当前版本已经在小米 13、Android 14、闲鱼 7.19.70 上完成真实
 `notification → event → decision → Android reply → sent receipt` 验收。
+2026-08-10 新增的单实例/监督器保护已在本机验证；Activity Intent 真实身份字段仍需在手机
+重新连接后补一次消息 E2E，字段缺失或歧义时系统会安全跳过，不会猜测回复目标。
 
 ## 推荐阅读顺序
 
@@ -120,6 +122,7 @@ Get-Content .\var\service\gateway.log -Tail 50
 - 目标账号必须已在 9090 后台导入有效 Cookie；
 - `ANDROID_GATEWAY_ACCOUNT_IDS` 必须包含同一个 Cookie ID；
 - 同一台手机、同一账号只能运行一个网关实例；
+- 第二个实例会被状态文件旁的 OS 锁拒绝；
 - `sent` 表示发送气泡已在闲鱼 UI 中确认，不等同于对方已经阅读；
 - `send_unconfirmed` 表示发送按钮最多已经点击一次但 UI 无法确认，系统不会自动重发，
   必须人工检查聊天页。

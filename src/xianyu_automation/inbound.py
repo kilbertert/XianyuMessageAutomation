@@ -8,7 +8,7 @@ import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from .errors import DeviceStateError
 from .models import (
@@ -183,7 +183,11 @@ class InboundPoller:
         interval_seconds: float,
         duration_seconds: float | None = None,
         include_existing: bool = False,
+        while_running: Callable[[], bool] | None = None,
     ) -> Iterator[InboundResult]:
+        running = while_running or (lambda: True)
+        if not running():
+            return
         yield from self.poll(include_existing=include_existing)
         deadline = (
             time.monotonic() + duration_seconds
@@ -192,4 +196,6 @@ class InboundPoller:
         )
         while deadline is None or time.monotonic() < deadline:
             time.sleep(interval_seconds)
+            if not running():
+                break
             yield from self.poll()

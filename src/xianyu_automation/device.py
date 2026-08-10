@@ -1,13 +1,55 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import time
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import unquote
 
 from .config import AutomationConfig
 from .errors import DeviceStateError
 from .parser import find_text, unread_count
+
+
+def _route_field(dump: str, names: tuple[str, ...]) -> str | None:
+    alternatives = "|".join(re.escape(name) for name in names)
+    matches = re.finditer(
+        rf"(?i)(?<![A-Za-z0-9_])(?:{alternatives})[\"']?\s*(?:=|:)\s*[\"']?"
+        rf"([A-Za-z0-9_:@.-]+)",
+        dump,
+    )
+    values = set()
+    for match in matches:
+        value = match.group(1).strip()
+        if value.endswith("@goofish"):
+            value = value[: -len("@goofish")]
+        if value and value.casefold() not in {"null", "none"}:
+            values.add(value)
+    return next(iter(values)) if len(values) == 1 else None
+
+
+def parse_chat_route_evidence(activity_dump: str) -> dict[str, str]:
+    decoded = unquote(unquote(activity_dump or ""))
+    chat_id = _route_field(
+        decoded,
+        ("sessionId", "session_id", "conversationId", "conversation_id", "chatId", "chat_id", "cid"),
+    )
+    sender_id = _route_field(
+        decoded,
+        ("senderUserId", "sender_user_id", "buyerId", "buyer_id", "otherUserId", "other_user_id"),
+    )
+    if not chat_id or not sender_id:
+        return {}
+    evidence = {
+        "chat_id": chat_id,
+        "sender_id": sender_id,
+        "source": "android_activity_intent",
+    }
+    item_id = _route_field(decoded, ("itemId", "item_id"))
+    if item_id:
+        evidence["item_id"] = item_id
+    return evidence
 
 
 class DevicePort(Protocol):
@@ -33,6 +75,8 @@ class DevicePort(Protocol):
 
     def display_size(self) -> tuple[int, int]: ...
 
+    def chat_route_evidence(self) -> dict[str, str]: ...
+
     def return_home(self) -> None: ...
 
 
@@ -56,6 +100,28 @@ class Uiautomator2Device:
 
     def display_size(self) -> tuple[int, int]:
         return self._size()
+
+    def chat_route_evidence(self) -> dict[str, str]:
+        self.ensure_chat()
+        process = subprocess.run(
+            [
+                self.config.adb_path,
+                "-s",
+                self.config.serial,
+                "shell",
+                "dumpsys",
+                "activity",
+                "top",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if process.returncode != 0:
+            return {}
+        return parse_chat_route_evidence(process.stdout)
 
     def _click_ratio(self, point: tuple[float, float]) -> None:
         width, height = self._size()

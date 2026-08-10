@@ -122,6 +122,7 @@ notification
   -> health
   -> open_notification
   -> extract latest inbound
+  -> read explicit Activity Intent identity
   -> begin(extracted)
   -> submit event
   -> set_decision(decided)
@@ -142,6 +143,9 @@ notification
 | `sender_label` | 通知标题，通常是遮罩昵称 |
 | `body` | 最新可见左侧气泡 |
 | `observed_at` | 本地观察通知的 UTC 时间 |
+| `chat_id`、`sender_id` | Activity Intent 显式字段；两者完整时才提交 |
+| `item_id` | Activity Intent 可选显式字段 |
+| `correlation_source` | 当前只允许 `android_activity_intent` |
 
 ### 6.2 决策
 
@@ -240,8 +244,10 @@ JSON 状态文件采用：
 2. 完整写入 JSON；
 3. `os.replace` 原子替换。
 
-本地队列的多进程状态转换额外使用 OS 文件锁。生产 Gateway 当前限定一个进程和一个
-飞行中事件，不提供多实例分布式锁；运维层必须保证单实例。
+本地队列的多进程状态转换使用 OS 文件锁。生产 Gateway 还会对
+`gateway.state_file + ".lock"` 获取进程所有权锁；第二个实例立即退出，进程崩溃时由操作系统
+释放锁。监督器把自身 PID 传给网关，监督器消失后子进程在下一次轮询边界自行退出。
+当前仍限定单设备、单账号和单飞行中事件，不提供跨主机分布式锁。
 
 ## 11. 安全不变量
 
@@ -250,6 +256,7 @@ JSON 状态文件采用：
 - `inbox` 绝不输入文本或点击发送；
 - `reply` 默认 dry-run；
 - Gateway 点击前持久化 `sending`；
+- 真实 `chat_id` 与 `sender_id` 没有完整、唯一证据时后台只能返回 `noop`；
 - 普通公网 HTTP 被拒绝；
 - HMAC 密钥只从环境读取；
 - 服务密钥由 Windows DPAPI 保护；
@@ -264,7 +271,8 @@ JSON 状态文件采用：
 - 手机锁屏、系统弹窗或闲鱼前台状态会影响路由；
 - UI 坐标和 Activity 可能随版本改变；
 - 图片发送尚未实现；
-- 脱敏会话无法支持精确商品/买家规则；
+- Activity Intent 是否在当前闲鱼版本持续暴露真实会话字段仍需逐版本真机验收；
+- Activity Intent 无完整字段且后台没有唯一近期真实会话时，系统会安全漏回；
 - 当前没有独立 Android `NotificationListenerService`，仍依赖 ADB 常连。
 
 ## 13. 测试边界

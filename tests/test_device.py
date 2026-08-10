@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from xianyu_automation.device import Uiautomator2Device
+from xianyu_automation.device import Uiautomator2Device, parse_chat_route_evidence
 from xianyu_automation.errors import DeviceStateError
 
 
@@ -25,6 +25,36 @@ def _device(activities: list[str]) -> tuple[Uiautomator2Device, FakeU2Device]:
     device.config = SimpleNamespace(app=SimpleNamespace(chat_activity=".ChatActivity"))
     device._device = backing
     return device, backing
+
+
+def test_chat_route_evidence_extracts_only_explicit_conversation_fields() -> None:
+    activity_dump = """
+      ACTIVITY com.taobao.idlefish/.ChatActivity
+      Intent { dat=fleamarket://chat?itemId=910001 flg=0x10000000
+        extras=Bundle[{sessionId=chat-001, senderUserId=buyer-001, userId=owner-999}] }
+    """
+
+    assert parse_chat_route_evidence(activity_dump) == {
+        "chat_id": "chat-001",
+        "sender_id": "buyer-001",
+        "item_id": "910001",
+        "source": "android_activity_intent",
+    }
+
+
+def test_chat_route_evidence_rejects_generic_user_id_and_partial_identity() -> None:
+    activity_dump = "Intent { extras=Bundle[{sessionId=chat-001, userId=owner-999}] }"
+
+    assert parse_chat_route_evidence(activity_dump) == {}
+
+
+def test_chat_route_evidence_rejects_conflicting_explicit_fields() -> None:
+    activity_dump = """
+      Intent { extras=Bundle[{sessionId=chat-001, senderUserId=buyer-001}] }
+      Intent { extras=Bundle[{sessionId=chat-002, senderUserId=buyer-002}] }
+    """
+
+    assert parse_chat_route_evidence(activity_dump) == {}
 
 
 def test_leave_chat_handles_open_keyboard_then_chat(monkeypatch) -> None:

@@ -92,7 +92,8 @@ try {
         try {
             $gatewayArguments = @(
                 "--config", $resolvedConfig,
-                "gateway", "--interval", "0.5"
+                "gateway", "--interval", "0.5",
+                "--supervisor-pid", $PID
             )
             if (Test-Path -LiteralPath $resolvedNotificationState -PathType Leaf) {
                 $gatewayArguments += "--include-existing"

@@ -27,9 +27,9 @@
 .\.venv\Scripts\xianyu-msg.exe --config config.json doctor
 ```
 
-当前仓库在最终链路修复后：
+当前仓库在 P0 可靠性修复后：
 
-- 48 项测试通过；
+- 55 项测试通过；
 - `git diff --check` 通过；
 - `doctor` 确认 ADB、输入注入、闲鱼包和版本。
 
@@ -43,7 +43,8 @@
 - 事件幂等、发送阶段持久化和崩溃恢复；
 - AdbKeyboard 精确输入和原输入法恢复；
 - 发送后聊天重开确认；
-- Windows 计划任务、DPAPI、ACL、日志轮转和重启重放参数。
+- Windows 计划任务、DPAPI、ACL、日志轮转、监督器 PID 和单实例锁；
+- Activity Intent 显式身份解析、缺失/歧义身份失败关闭。
 
 ## 3. 真机端到端验收步骤
 
@@ -86,7 +87,8 @@ Get-Content .\var\gateway-notification-state.json -Raw | ConvertFrom-Json
 `android_gateway_events` 对应行要求：
 
 - `event_json.body` 正确；
-- `resolution_json.correlation_status=notification_only`；
+- `resolution_json.correlation_status=matched`；
+- `resolution_json.chat_id/sender_id` 是真实非空标识；
 - `decision.action=reply`；
 - `decision.text` 与预期完全一致；
 - `decision.source` 符合配置；
@@ -113,7 +115,27 @@ Get-Content .\var\gateway-notification-state.json -Raw | ConvertFrom-Json
 - 私有截图只在确有需要时保留；
 - 不把 Cookie ID、聊天正文或共享密钥写入公开报告。
 
-## 4. 2026-08-02 最终自动链路记录
+## 4. 2026-08-10 两个 P0 回归记录
+
+自动与本机服务检查结果：
+
+| 检查 | 结果 |
+|---|---|
+| Android 网关测试 | 55 项通过 |
+| 后台 Android 网关专项测试 | 16 项通过 |
+| 后台全量测试 | 65 项通过；1 项既有滑块登录 mock 参数失败，与本变更无关 |
+| 计划任务 | `XianyuAndroidMessageGateway` 为 `Running` |
+| 子进程命令 | 含 `--supervisor-pid <PowerShell PID>` |
+| 并发启动 | 第二个实例以 `another gateway instance is already running` 拒绝 |
+| 停止监督器 | 原监督器与子进程链全部退出，任务可重新启动 |
+| 身份缺失 | `noop/identity_not_correlated`，不调用决策、不写空身份消息 |
+| 身份歧义 | `noop/identity_ambiguous`，不调用决策、不发送 |
+
+本轮检查时手机未出现在 `adb devices`，因此 Activity Intent 在当前闲鱼版本上是否实际携带
+`chat_id/sender_id/item_id` 尚未完成真机证明。网关会受控重试，且在身份证据不足时安全漏回；
+不能把解析器单元测试当作真实消息 E2E 通过。
+
+## 5. 2026-08-02 最终自动链路记录
 
 第二个自有账号发送：
 
@@ -147,7 +169,7 @@ ANDROID_FASTIME_REPLY_OK_20260802_2245
 该验收全程由活动通知自动触发，没有人工代发。后台事件、决策、Android UI 发送确认和服务器
 回执一致。临时关键词规则随后精确删除。
 
-## 5. 本轮发现并修复的问题
+## 6. 2026-08-02 发现并修复的问题
 
 ### AdbKeyboard 安装与精确文本
 
@@ -183,7 +205,7 @@ ANDROID_FASTIME_REPLY_OK_20260802_2245
 
 最终 `auto_e2e_fastime_002` 验收同时覆盖了以上修复。
 
-## 6. 历史里程碑
+## 7. 历史里程碑
 
 ### 手工单会话发送
 
@@ -204,7 +226,7 @@ claim/fail 真实 CLI 状态转换。
 后续测试完成了 Android 事件到 9090 关键词决策和真实回复，并逐步暴露输入法、气泡刷新、
 通知渲染和重启基线问题。最终记录取代这些中间结果作为当前通过标准。
 
-## 7. 当前证明与未证明
+## 8. 当前证明与未证明
 
 已经证明：
 
@@ -215,7 +237,8 @@ claim/fail 真实 CLI 状态转换。
 - 最多一次发送点击；
 - UI `sent` 确认和服务器回执；
 - 进程重启对未确认活动通知的恢复；
-- 单实例 Windows 常驻运行。
+- 单实例 Windows 常驻运行、第二实例拒绝和监督器退出联动；
+- 身份缺失或歧义时后台失败关闭且不污染聊天记录。
 
 尚未证明或不支持：
 
@@ -225,7 +248,8 @@ claim/fail 真实 CLI 状态转换。
 - 超出可见屏幕的多条聚合消息完整补齐；
 - 相同遮罩发送者标题的歧义会话；
 - 图片自动回复；
-- 依赖真实商品 ID 或买家 ID 的规则；
+- 当前闲鱼版本 Activity Intent 是否实际持续暴露真实 `chat_id/sender_id/item_id`；
+- 缺少 Activity Intent 证据且本地无唯一近期会话时的自动回复（按设计跳过）；
 - 多手机、多账号并行的分布式调度。
 
 任何涉及这些边界的扩展都必须新增测试夹具并重新执行真机 E2E，不能沿用本记录推断通过。
