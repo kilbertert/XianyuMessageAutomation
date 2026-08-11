@@ -156,7 +156,7 @@ docker compose up -d --force-recreate
 服务器本机检查：
 
 ```bash
-curl http://127.0.0.1:8090/api/android-gateway/v1/health
+curl http://127.0.0.1:9090/api/android-gateway/v1/health
 ```
 
 Windows 端检查实际地址：

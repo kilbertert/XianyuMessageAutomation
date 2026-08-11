@@ -114,8 +114,10 @@ def test_inbound_workflow_deduplicates_queue_without_plaintext_state(tmp_path) -
 class FakeNotificationSource:
     def __init__(self, snapshots: list[list[NotificationEvent]]):
         self.snapshots = iter(snapshots)
+        self.calls = 0
 
     def snapshot(self) -> list[NotificationEvent]:
+        self.calls += 1
         return next(self.snapshots)
 
 
@@ -176,3 +178,27 @@ def test_inbound_poller_acknowledges_only_after_success(tmp_path) -> None:
 
     assert [result.status for result in results] == ["queued"]
     assert workflow.calls == 2
+
+
+def test_inbound_watch_stops_before_polling_after_supervisor_exits(tmp_path) -> None:
+    source = FakeNotificationSource([[], []])
+    poller = InboundPoller(
+        source,
+        NotificationStateStore(tmp_path / "notification-state.json"),
+        InboundWorkflow(
+            FakeInboundDevice(),
+            InboundQueue(tmp_path / "inbound-state.json", tmp_path / "pending.jsonl"),
+        ),
+    )
+    checks = iter([True, False])
+
+    results = list(
+        poller.watch(
+            interval_seconds=0,
+            include_existing=False,
+            while_running=lambda: next(checks),
+        )
+    )
+
+    assert results == []
+    assert source.calls == 1

@@ -38,6 +38,7 @@ def test_supervisor_uses_dpapi_secret_and_gateway_command() -> None:
     assert '"gateway", "--interval", "0.5"' in source
     assert 'Test-Path -LiteralPath $resolvedNotificationState' in source
     assert '$gatewayArguments += "--include-existing"' in source
+    assert '"--supervisor-pid", $PID' in source
     assert "while ($true)" in source
 
 

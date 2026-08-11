@@ -34,6 +34,8 @@ class GatewayDevicePort(Protocol):
 
     def display_size(self) -> tuple[int, int]: ...
 
+    def chat_route_evidence(self) -> dict[str, str]: ...
+
     def ensure_chat(self) -> None: ...
 
     def dump_hierarchy(self) -> str: ...
@@ -45,6 +47,104 @@ class GatewayDevicePort(Protocol):
     def reopen_chat(self, title: str) -> str: ...
 
     def return_home(self) -> None: ...
+
+
+class GatewayInstanceLock:
+    """An OS-owned lock that prevents concurrent control of one gateway state."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self._handle = None
+
+    @classmethod
+    def for_state_file(cls, state_file: Path) -> GatewayInstanceLock:
+        return cls(Path(f"{state_file}.lock"))
+
+    def acquire(self) -> None:
+        if self._handle is not None:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        handle = self.path.open("a+b")
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            handle.close()
+            raise AutomationError(
+                f"another gateway instance is already running: {self.path}"
+            ) from exc
+        self._handle = handle
+
+    def release(self) -> None:
+        handle = self._handle
+        if handle is None:
+            return
+        try:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+            self._handle = None
+
+    def __enter__(self) -> GatewayInstanceLock:
+        self.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.release()
+
+
+def is_process_running(process_id: int) -> bool:
+    if process_id <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, wintypes.LPDWORD]
+        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+
+        handle = kernel32.OpenProcess(0x1000, False, process_id)
+        if not handle:
+            return False
+        try:
+            exit_code = wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                return False
+            return exit_code.value == 259
+        finally:
+            kernel32.CloseHandle(handle)
+
+    try:
+        os.kill(process_id, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def _signed_headers(secret: str, body: bytes, timestamp: int) -> dict[str, str]:
@@ -318,7 +418,7 @@ class GatewayWorkflow:
         event_id = hashlib.sha256(
             f"{notification.fingerprint}\0{body}".encode("utf-8")
         ).hexdigest()
-        return {
+        event = {
             "event_id": event_id,
             "device_id": self.settings.device_id,
             "account_id": self.settings.account_id,
@@ -327,6 +427,18 @@ class GatewayWorkflow:
             "body": body,
             "observed_at": notification.observed_at,
         }
+        evidence = self.device.chat_route_evidence()
+        if evidence.get("chat_id") and evidence.get("sender_id"):
+            event.update(
+                {
+                    "chat_id": evidence["chat_id"],
+                    "sender_id": evidence["sender_id"],
+                    "correlation_source": evidence.get("source"),
+                }
+            )
+            if evidence.get("item_id"):
+                event["item_id"] = evidence["item_id"]
+        return event
 
     def _continue(self, event: dict[str, Any], xml: str) -> GatewayResult:
         event_id = str(event["event_id"])

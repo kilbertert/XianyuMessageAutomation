@@ -9,7 +9,7 @@ ADB 和闲鱼 UI 自动化依赖已登录用户的交互式会话，Session 0 �
 Windows Task Scheduler
   XianyuAndroidMessageGateway
     -> powershell.exe scripts/gateway_service.ps1
-         -> xianyu-msg.exe gateway --interval 0.5 [--include-existing]
+         -> xianyu-msg.exe gateway --interval 0.5 --supervisor-pid <PID> [--include-existing]
               -> Python gateway process
 ```
 
@@ -18,6 +18,7 @@ Windows Task Scheduler
 - 从当前用户 DPAPI 文件解密共享密钥；
 - 只在子进程环境中设置 `ANDROID_GATEWAY_SHARED_SECRET`；
 - 启动网关；
+- 把监督器 PID 传给网关，监督器退出后子进程自行停止；
 - 子进程退出后等待 10 秒再启动；
 - 记录启动、停止和异常事件；
 - 日志达到 10 MiB 时轮转一份归档。
@@ -91,6 +92,9 @@ Get-CimInstance Win32_Process |
 
 期望一个 PowerShell 根监督器和一条 `xianyu-msg/python` 父子链。
 
+网关同时持有状态文件旁的 OS 锁。即使计划任务的“忽略重复实例”或人工操作失效，第二个
+`gateway` 也会以退出码 2 拒绝启动；锁由进程所有权控制，崩溃后不需要人工删除。
+
 ## 5. 通知基线和重启重放
 
 首次启动时，如果 `gateway.notification_state_file` 尚不存在，CLI 不带
@@ -139,8 +143,8 @@ Start-Sleep -Seconds 2
 Start-ScheduledTask -TaskName XianyuAndroidMessageGateway
 ```
 
-如果停止后仍有旧子进程，不要按名称结束所有 Python。先用完整命令行和父进程关系确认只属于
-本仓库，再结束精确 PID。
+新版本子进程会在监督器 PID 消失后自行退出。如果停止后仍有旧版本遗留子进程，不要按名称
+结束所有 Python；先用完整命令行和父进程关系确认只属于本仓库，再结束精确 PID。
 
 ## 8. 运行要求
 

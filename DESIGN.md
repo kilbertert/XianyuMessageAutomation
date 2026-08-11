@@ -86,6 +86,7 @@ sequenceDiagram
     G->>X: 等待通知标题出现并唯一点击
     X-->>G: 打开准确聊天页
     G->>G: 提取最新左侧入站气泡
+    G->>G: 读取 Activity Intent 中的显式会话证据
     G->>G: 持久化 extracted 事件
     G->>S: POST /events（HMAC、幂等 event_id）
     S->>D: 保存事件并运行现有决策链
@@ -119,13 +120,14 @@ Android 的完成账本也按该 ID 去重。
 
 ### 会话身份
 
-闲鱼 Android UI 当前不能稳定提供真实 `buyer_id`、`item_id` 或 WebSocket `chat_id`。
-后台因此从 `account_id + sender_label` 生成 `android:<hash>` 形式的脱敏稳定 ID，并把
-`item_id` 留空。这意味着：
+网关在聊天打开后读取 `dumpsys activity top`，只接受 Activity Intent 中显式的会话字段：
+`sessionId/conversationId/chatId/cid` 与 `senderUserId/buyerId/otherUserId` 必须同时存在，
+`itemId` 可选。完整证据以 `correlation_source=android_activity_intent` 随签名事件提交。
 
-- 通用关键词、默认回复、消息过滤和 AI 可以使用；
-- 依赖精确商品 ID 或真实买家 ID 的规则不会猜测匹配；
-- 当前关联状态通常为 `notification_only`。
+如果 App 没有暴露完整证据，后台只允许用五分钟内、正文一致且
+`chat_id + sender_id + item_id` 上下文唯一的本地真实聊天记录关联；
+遮罩昵称只用于缩小候选范围，不能生成身份。零个或多个候选都返回 `noop`，不会调用 AI/规则、
+不会写入空身份聊天记录，也不会点击发送。系统不再用 `android:<hash>` 合成身份。
 
 ## 5. Android 发送一致性
 
@@ -218,6 +220,7 @@ stateDiagram-v2
 - 手机必须连接、授权并在需要操作时解锁；
 - 闲鱼应位于后台以产生系统通知；
 - 一个账号不能同时运行两个 Android 网关；
+- 网关状态文件旁的 OS 所有权锁拒绝第二个进程；监督器 PID 消失时子进程自行退出；
 - 通知标题若不唯一则失败关闭，不猜测会话；
 - 聚合通知只保证提取最新可见入站气泡，超过屏幕范围的中间突发消息可能遗漏；
 - 图片回复返回 `unsupported`；
@@ -234,7 +237,7 @@ stateDiagram-v2
 | 点击前持久化 `sending` | 崩溃时避免重复发送 | 不确定结果需要人工复核 |
 | AdbKeyboard 精确输入 | 系统输入法候选区会截断或滞留文本 | 首次安装需要人在手机上确认 |
 | HMAC + Tailscale | 保护聊天正文和决策接口 | 两端时钟和密钥必须一致 |
-| 脱敏合成会话 ID | Android UI 不暴露真实标识 | 精确商品/买家规则不可用 |
+| 真实身份关联失败关闭 | 错把两个买家或商品串线比漏回更危险 | 无唯一证据时跳过回复并留审计记录 |
 
 ## 12. 相关文档
 
@@ -244,3 +247,16 @@ stateDiagram-v2
 - [日常运维](docs/operations.md)
 - [故障排查](docs/troubleshooting.md)
 - [验收记录](docs/validation.md)
+
+## 13. 变更历史
+
+### 2026-08-10 - 单实例守护与真实身份失败关闭
+
+**变更内容**：增加 OS 所有权锁、监督器 PID 联动、Activity Intent 显式身份证据，以及后台
+真实会话/买家/商品上下文唯一性校验。
+
+**变更理由**：防止重复网关争抢同一手机，并避免遮罩昵称导致买家或商品串线。
+
+**影响范围**：Android 常驻服务、事件协议、后台关联决策、聊天落库和运维验收。
+
+**决策依据**：无法唯一关联时漏回优于错误回复；商品上下文冲突与会话冲突同样失败关闭。

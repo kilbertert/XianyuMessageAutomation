@@ -60,7 +60,7 @@ docker compose up -d --force-recreate
 服务器本机健康检查：
 
 ```bash
-curl http://127.0.0.1:8090/api/android-gateway/v1/health
+curl http://127.0.0.1:9090/api/android-gateway/v1/health
 ```
 
 Windows 使用 `config.json.gateway.base_url` 中的地址，例如：
@@ -136,7 +136,11 @@ X-Gateway-Signature: <HMAC-SHA256十六进制>
   "notification_id": "通知指纹",
   "sender_label": "x***3",
   "body": "消息正文",
-  "observed_at": "2026-08-02T15:10:59.845388Z"
+  "observed_at": "2026-08-02T15:10:59.845388Z",
+  "chat_id": "真实会话ID，可选",
+  "sender_id": "真实买家ID，可选",
+  "item_id": "真实商品ID，可选",
+  "correlation_source": "android_activity_intent"
 }
 ```
 
@@ -160,7 +164,7 @@ X-Gateway-Signature: <HMAC-SHA256十六进制>
     "source": "关键词",
     "reason": "matched"
   },
-  "correlation_status": "notification_only"
+  "correlation_status": "matched"
 }
 ```
 
@@ -220,14 +224,18 @@ HMAC-SHA256(shared_secret, message).hexdigest()
 | 无规则/被过滤 | `noop` | 不触碰输入框，回执 `skipped` |
 | 图片回复 | `unsupported` | 不把图片标记当文本发送，回执 `failed` |
 
-Android 事件不能稳定提供真实买家 ID、商品 ID 或 WebSocket 会话 ID。后台使用：
+后台只在以下任一路径提供唯一真实身份时调用 `decide_chat_message_reply`：
 
-```text
-chat_id = sender_id = android:<SHA256(account_id + sender_label)前24位>
-item_id = ""
-```
+1. 签名 Android 事件包含 `correlation_source=android_activity_intent`，并同时包含显式的
+   `chat_id` 与 `sender_id`；`item_id` 可选；
+2. 后台本地聊天缓存中，存在五分钟内、方向为入站、正文一致且真实
+   `chat_id/sender_id/item_id` 上下文唯一的会话。遮罩发送者名称只能缩小候选范围；同一
+   会话出现冲突商品 ID 也视为歧义。
 
-所以通用关键词、默认回复和 AI 可用；依赖精确商品或真实买家的规则不会命中。
+第二条只读 SQLite 本地缓存，不调用旧 WebSocket 的 `list_newest_conversations`。没有候选时
+返回 `noop/identity_not_correlated`，多个候选时返回 `noop/identity_ambiguous`。两种情况都
+不会调用 AI/关键词策略、不会写空身份聊天记录、不会触发 Android 发送。系统不再使用
+`android:<hash>` 合成身份。
 
 ## 8. SQLite 审计
 
@@ -260,6 +268,7 @@ item_id = ""
 | 后台 5xx/网络失败 | Android 按配置重试 HTTP，不点击发送 |
 | 事件重复 | 返回缓存决策 |
 | Cookie 缺失 | `noop/account_cookie_not_found` |
+| 身份没有唯一证据 | `noop/identity_not_correlated` 或 `noop/identity_ambiguous` |
 | 图片决策 | `unsupported`，不发送文本 |
 | 回执重复 | 幂等返回，不重复写聊天记录 |
 | 发送边界崩溃 | Android 回报 `send_unconfirmed`，不再次点击 |
